@@ -265,9 +265,29 @@ const supabase = {
         updated_at: new Date().toISOString()
       }))
     ];
-    await fetch(`${SUPABASE_URL}/rest/v1/pokemon_collection_items?user_id=eq.${userId}`, {
+    const collectionIds = (collection || []).map((card) => card.id).filter(Boolean);
+    const wishlistIds = (wishlist || []).map((card) => card.id).filter(Boolean);
+    const deleteHeaders = { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` };
+    const buildDeleteUrl = (itemType, ids) => {
+      const params = new URLSearchParams({
+        user_id: `eq.${userId}`,
+        item_type: `eq.${itemType}`
+      });
+      if (ids && ids.length > 0) {
+        const listValue = ids
+          .map((value) => `"${String(value).replace(/"/g, '""')}"`)
+          .join(',');
+        params.set('card_id', `not.in.(${listValue})`);
+      }
+      return `${SUPABASE_URL}/rest/v1/pokemon_collection_items?${params.toString()}`;
+    };
+    await fetch(buildDeleteUrl('collection', collectionIds), {
       method: 'DELETE',
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+      headers: deleteHeaders
+    });
+    await fetch(buildDeleteUrl('wishlist', wishlistIds), {
+      method: 'DELETE',
+      headers: deleteHeaders
     });
     if (rows.length === 0) return;
     await fetch(`${SUPABASE_URL}/rest/v1/pokemon_collection_items`, {
@@ -486,6 +506,12 @@ export default function PokemonCardTracker() {
     saveTimeoutRef.current = setTimeout(saveUserData, 1500);
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [collection, wishlist, cardTags, cardQuantities, allTags]);
+
+  useEffect(() => {
+    if (currentUser && cloudConnected) {
+      loadUserData(currentUser.username);
+    }
+  }, [currentUser, cloudConnected]);
 
   useEffect(() => {
     const pageCount = Math.ceil(cards.length / PAGE_SIZE);
