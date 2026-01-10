@@ -188,6 +188,12 @@ const supabase = {
     });
     return res.json();
   },
+  async loadItems(userId) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/pokemon_collection_items?user_id=eq.${userId}&select=*`, {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+    });
+    return res.json();
+  },
   async createUser(username, password, isAdmin = false) {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/pokemon_users`, {
       method: 'POST',
@@ -209,12 +215,32 @@ const supabase = {
       method: 'DELETE',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
     });
-    await fetch(`${SUPABASE_URL}/rest/v1/pokemon_collections?user_id=eq.${username}`, {
+    await fetch(`${SUPABASE_URL}/rest/v1/pokemon_collection_items?user_id=eq.${username}`, {
       method: 'DELETE',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
     });
   },
   async loadData(userId) {
+    const items = await this.loadItems(userId);
+    if (Array.isArray(items) && items.length > 0 && !items.error) {
+      const collectionItems = items.filter((item) => item.item_type === 'collection');
+      const wishlistItems = items.filter((item) => item.item_type === 'wishlist');
+      const cardTags = {};
+      const cardQuantities = {};
+      collectionItems.forEach((item) => {
+        if (!item.card_id) return;
+        cardTags[item.card_id] = item.tags || [];
+        cardQuantities[item.card_id] = item.quantity || 1;
+      });
+      const allTags = Object.values(cardTags).flat().filter((tag, index, arr) => arr.indexOf(tag) === index);
+      return {
+        collection: collectionItems.map((item) => item.card_data || { id: item.card_id }),
+        wishlist: wishlistItems.map((item) => item.card_data || { id: item.card_id }),
+        card_tags: cardTags,
+        card_quantities: cardQuantities,
+        all_tags: allTags
+      };
+    }
     const res = await fetch(`${SUPABASE_URL}/rest/v1/pokemon_collections?user_id=eq.${userId}&select=*`, {
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
     });
@@ -222,15 +248,36 @@ const supabase = {
     return data[0] || null;
   },
   async saveData(userId, collection, wishlist, cardTags, cardQuantities, allTags) {
-    const body = { user_id: userId, collection, wishlist, card_tags: cardTags, card_quantities: cardQuantities, all_tags: allTags, updated_at: new Date().toISOString() };
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/pokemon_collections?user_id=eq.${userId}`, {
-      method: 'GET',
+    const rows = [
+      ...(collection || []).map((card) => ({
+        user_id: userId,
+        card_id: card.id,
+        item_type: 'collection',
+        quantity: cardQuantities[card.id] || 1,
+        tags: cardTags[card.id] || [],
+        card_data: card,
+        updated_at: new Date().toISOString()
+      })),
+      ...(wishlist || []).map((card) => ({
+        user_id: userId,
+        card_id: card.id,
+        item_type: 'wishlist',
+        quantity: 1,
+        tags: cardTags[card.id] || [],
+        card_data: card,
+        updated_at: new Date().toISOString()
+      }))
+    ];
+    await fetch(`${SUPABASE_URL}/rest/v1/pokemon_collection_items?user_id=eq.${userId}`, {
+      method: 'DELETE',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
     });
-    const existing = await res.json();
-    const method = existing.length > 0 ? 'PATCH' : 'POST';
-    const url = existing.length > 0 ? `${SUPABASE_URL}/rest/v1/pokemon_collections?user_id=eq.${userId}` : `${SUPABASE_URL}/rest/v1/pokemon_collections`;
-    await fetch(url, { method, headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }, body: JSON.stringify(body) });
+    if (rows.length === 0) return;
+    await fetch(`${SUPABASE_URL}/rest/v1/pokemon_collection_items`, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(rows)
+    });
   }
 };
 
