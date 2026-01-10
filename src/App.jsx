@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Search, Star, ShoppingCart, Heart, X, Sparkles, Loader2, ExternalLink, RefreshCw, StopCircle, Filter, ChevronDown, Tag, Plus, LogOut, Shield, User } from 'lucide-react';
+import { Search, Star, ShoppingCart, Heart, X, Loader2, ExternalLink, RefreshCw, StopCircle, Filter, ChevronDown, Tag, Plus, LogOut, Shield, User } from 'lucide-react';
 import AdminPanel from './components/AdminPanel';
 import LoginScreen from './components/LoginScreen';
 import { hashPassword } from './utils/auth';
@@ -106,6 +106,20 @@ const normalizeCardImage = (card) => {
   }
   return null;
 };
+
+const PikachuIcon = ({ className }) => (
+  <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+    <path fill="currentColor" d="M6 10L4 3l5 3 3-3 3 3 5-3-2 7a6 6 0 11-14 0z" />
+  </svg>
+);
+
+const SquirtleIcon = ({ className }) => (
+  <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+    <circle cx="12" cy="8" r="3.5" fill="currentColor" />
+    <circle cx="12" cy="15.5" r="6" fill="currentColor" />
+    <circle cx="12" cy="15.5" r="3.5" fill="#00000020" />
+  </svg>
+);
 
 const extractUsdPriceFromCard = (card) => {
   if (!card) return null;
@@ -747,7 +761,11 @@ export default function PokemonCardTracker() {
       <header className="bg-blue-600 p-3 shadow-lg">
         <div className="flex items-center justify-between max-w-5xl mx-auto">
           <div className="flex items-center gap-2"><User size={16} className="text-white/80" /><span className="text-white/90 text-sm font-medium">{currentUser?.username}</span></div>
-          <h1 className="text-lg font-bold text-white flex items-center gap-2"><Sparkles size={18} /> Pokémon Cards <Sparkles size={18} /></h1>
+          <h1 className="text-lg font-bold text-white flex items-center gap-2">
+            <PikachuIcon className="w-7 h-7 text-white" />
+            Pokémon Cards
+            <SquirtleIcon className="w-7 h-7 text-white" />
+          </h1>
           <div className="flex items-center gap-2">
             {currentUser?.is_admin && <button onClick={() => setShowAdmin(true)} className="text-white/80 hover:text-white p-1"><Shield size={18} /></button>}
             <button onClick={handleLogout} className="text-white/80 hover:text-white p-1"><LogOut size={18} /></button>
@@ -775,6 +793,7 @@ export default function PokemonCardTracker() {
             </div>
             {error && <div className="mb-3 p-2 bg-red-100 border-2 border-red-300 rounded-lg text-red-800 text-sm font-medium">{error}</div>}
             {searchResults.length > 0 && !loading && <button onClick={resetToSample} className="mb-3 px-3 py-2 bg-white text-gray-700 rounded-lg hover:bg-gray-50 transition flex items-center gap-2 text-sm font-medium border-2 border-gray-300"><RefreshCw size={14} /> Back to Featured</button>}
+            {searchResults.length === 0 && !loading && <div className="mb-3 text-lg font-bold text-gray-800">Featured set</div>}
             {loading ? <div className="flex flex-col items-center justify-center py-12 gap-2 bg-white rounded-xl"><Loader2 className="animate-spin text-blue-600" size={40} /><p className="text-gray-700 font-medium">Searching...</p></div> : <CardGrid cardList={pagedBrowseCards} emptyMsg="No cards found." />}
             <Pagination currentPage={browsePage} pageCount={browsePageCount} onPageChange={setBrowsePage} />
           </>
