@@ -804,7 +804,7 @@ export default function PokemonCardTracker() {
   const pagedWishlist = wishlist.slice((wishlistPage - 1) * PAGE_SIZE, wishlistPage * PAGE_SIZE);
 
   return (
-    <div className="min-h-screen bg-blue-50">
+    <div className="min-h-screen bg-blue-50 flex flex-col">
       <header className="bg-blue-600 p-3 shadow-lg">
         <div className="flex items-center justify-between max-w-5xl mx-auto">
           <div className="flex items-center gap-2"><User size={16} className="text-white/80" /><span className="text-white/90 text-sm font-medium">{currentUser?.username}</span></div>
@@ -827,7 +827,7 @@ export default function PokemonCardTracker() {
         ))}
       </nav>
 
-      <main className="p-3 max-w-5xl mx-auto">
+      <main className="p-3 max-w-5xl mx-auto flex-1 w-full">
         {view === 'browse' && (
           <>
             <div className="space-y-2 mb-4">
@@ -878,7 +878,7 @@ export default function PokemonCardTracker() {
           </>
         )}
       </main>
-      <footer className="mt-6 py-4 text-center text-xs text-white bg-blue-600" />
+      <footer className="mt-auto py-4 text-center text-xs text-white bg-blue-600" />
 
       {selectedCard && <CardModal card={selectedCard} onClose={() => { setSelectedCard(null); setPriceResults([]); cancelPriceSearch(); }} />}
       {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} users={users} allTags={allTags} onAddUser={addNewUser} onDeleteUser={deleteUserAccount} onRenameTag={renameTag} onDeleteTag={deleteTagGlobally} getTagColor={getTagColor} />}
