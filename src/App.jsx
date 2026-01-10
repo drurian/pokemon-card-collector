@@ -11,8 +11,11 @@ import { hashPassword } from './utils/auth';
 // Then replace these lines with:
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
+const TCGDEX_API_URL = 'https://api.tcgdex.net/v2/en/cards';
+const TCGDEX_SETS_URL = 'https://api.tcgdex.net/v2/en/sets';
 
 const SESSION_STORAGE_KEY = 'pokemon-collector-session';
+const PAGE_SIZE = 12;
 
 const LEGACY_DEFAULT_ADMIN_HASHES = [
   'c64ba234d45b6422383f0261d09a8d4ed2cd156fd636b348899cc24c6fa8906f'
@@ -50,6 +53,118 @@ const getTagColor = (tagName) => {
   let hash = 0;
   for (let i = 0; i < tagName.length; i++) hash = tagName.charCodeAt(i) + ((hash << 5) - hash);
   return TAG_COLORS[Math.abs(hash) % TAG_COLORS.length];
+};
+
+const normalizeQuantities = (quantities) => Object.fromEntries(
+  Object.entries(quantities || {}).map(([id, qty]) => [id, Math.max(1, parseInt(qty, 10) || 1)])
+);
+
+const ensureQuantitiesForCollection = (collectionItems, quantities) => {
+  const updated = { ...(quantities || {}) };
+  (collectionItems || []).forEach((card) => {
+    if (!card?.id) return;
+    if (!updated[card.id]) updated[card.id] = 1;
+  });
+  return updated;
+};
+
+const dedupeById = (items) => {
+  const seen = new Set();
+  return (items || []).filter((item) => {
+    if (!item?.id || seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+};
+
+const buildTcgParams = (name, type, rarity) => {
+  const params = new URLSearchParams();
+  if (name.trim()) params.set('name', name.trim());
+  if (type) params.set('types', type);
+  if (rarity) params.set('rarity', rarity);
+  return params;
+};
+
+const ensureImageExtension = (url) => {
+  if (!url) return null;
+  const lower = url.toLowerCase();
+  if (/\.(png|jpe?g|webp)$/.test(lower)) return url;
+  if (lower.includes('assets.tcgdex.net')) return `${url}/high.webp`;
+  return `${url}.png`;
+};
+
+const normalizeCardImage = (card) => {
+  if (!card) return null;
+  if (typeof card.image === 'string') return ensureImageExtension(card.image);
+  if (card.image && typeof card.image === 'object') {
+    const candidate = card.image.high || card.image.large || card.image.medium || card.image.low || card.image.small || card.image.url;
+    if (candidate) return ensureImageExtension(candidate);
+  }
+  if (card.images && typeof card.images === 'object') {
+    const candidate = card.images.high || card.images.large || card.images.medium || card.images.low || card.images.small || card.images.png || card.images.jpg || card.images.webp || card.images.url;
+    if (candidate) return ensureImageExtension(candidate);
+  }
+  return null;
+};
+
+const extractUsdPriceFromCard = (card) => {
+  if (!card) return null;
+  const pricing = card.pricing || card.price;
+  const tcg = pricing?.tcgplayer;
+  const unit = tcg?.unit || pricing?.unit;
+  if (unit && unit !== 'USD') return null;
+  const holo = tcg?.holofoil || tcg?.normal || tcg?.reverseHolofoil || tcg?.firstEditionHolofoil;
+  const price = holo?.marketPrice ?? holo?.midPrice ?? holo?.lowPrice ?? tcg?.market ?? tcg?.mid ?? tcg?.low;
+  if (typeof price === 'number') return price;
+  if (typeof price === 'string') return price;
+  return null;
+};
+
+const formatPrice = (price) => {
+  if (price == null) return null;
+  if (typeof price === 'number') return `$${price.toFixed(2)}`;
+  return price;
+};
+
+const fetchJson = async (url, signal) => {
+  const res = await fetch(url, { signal });
+  if (!res.ok) {
+    throw new Error(`Request failed (HTTP ${res.status})`);
+  }
+  return res.json();
+};
+
+const getSetName = (set) => {
+  if (!set) return '';
+  if (typeof set === 'string') return set;
+  if (typeof set.name === 'string') return set.name;
+  if (typeof set.id === 'string') return set.id;
+  return '';
+};
+
+const formatTcgCard = (card) => ({
+  id: card.id,
+  name: card.name,
+  set: { name: getSetName(card.set) },
+  number: card.localId || card.number,
+  rarity: card.rarity,
+  types: card.types || [],
+  image: normalizeCardImage(card)
+});
+
+const needsCardDetails = (card) => !card?.set?.name || !card?.rarity || !card?.types?.length;
+
+const enrichCardsWithDetails = async (cards, signal) => {
+  const pending = cards.map(async (card) => {
+    if (!card?.id || !needsCardDetails(card)) return card;
+    try {
+      const detail = await fetchJson(`${TCGDEX_API_URL}/${card.id}`, signal);
+      return formatTcgCard({ ...card, ...detail });
+    } catch (e) {
+      return card;
+    }
+  });
+  return Promise.all(pending);
 };
 
 const supabase = {
@@ -112,6 +227,9 @@ export default function PokemonCardTracker() {
   const [showAdmin, setShowAdmin] = useState(false);
 
   const [view, setView] = useState('browse');
+  const [browsePage, setBrowsePage] = useState(1);
+  const [collectionPage, setCollectionPage] = useState(1);
+  const [wishlistPage, setWishlistPage] = useState(1);
   const [cards, setCards] = useState(SAMPLE_CARDS);
   const [collection, setCollection] = useState([]);
   const [wishlist, setWishlist] = useState([]);
@@ -123,6 +241,7 @@ export default function PokemonCardTracker() {
   const [selectedCard, setSelectedCard] = useState(null);
   const [priceResults, setPriceResults] = useState([]);
   const [searchingPrices, setSearchingPrices] = useState(false);
+  const [priceSummary, setPriceSummary] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [error, setError] = useState('');
   const [saveStatus, setSaveStatus] = useState('');
@@ -159,6 +278,57 @@ export default function PokemonCardTracker() {
       localStorage.removeItem(SESSION_STORAGE_KEY);
     }
   }, [users, currentUser]);
+
+  useEffect(() => {
+    const loadFeaturedCards = async () => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      setLoading(true);
+      setError('');
+      try {
+        const sets = await fetchJson(TCGDEX_SETS_URL, controller.signal);
+        const sortedSets = Array.isArray(sets)
+          ? sets.slice().sort((a, b) => new Date(b.releaseDate || 0) - new Date(a.releaseDate || 0))
+          : [];
+        const featuredSet = sortedSets[0];
+        if (!featuredSet?.id) throw new Error('No sets found');
+        const candidateUrls = [
+          `${TCGDEX_SETS_URL}/${featuredSet.id}`,
+          `${TCGDEX_SETS_URL}/${featuredSet.id}/cards`,
+          `${TCGDEX_API_URL}?set=${featuredSet.id}`
+        ];
+        let cardsData = null;
+        for (const url of candidateUrls) {
+          try {
+            const data = await fetchJson(url, controller.signal);
+            if (Array.isArray(data?.cards)) {
+              cardsData = data.cards;
+              break;
+            }
+            if (Array.isArray(data)) {
+              cardsData = data;
+              break;
+            }
+          } catch (innerError) {
+            console.warn('Failed tcgdex fetch:', url, innerError);
+          }
+        }
+        const list = Array.isArray(cardsData) ? cardsData : [];
+        const formatted = list.map(formatTcgCard).slice(0, PAGE_SIZE);
+        const enriched = await enrichCardsWithDetails(formatted, controller.signal);
+        const finalCards = enriched.length > 0 ? enriched : formatted;
+        if (finalCards.length === 0) throw new Error('No cards found in set');
+        setCards(finalCards);
+      } catch (e) {
+        setCards(SAMPLE_CARDS);
+        setError('Featured cards unavailable. Showing sample cards.');
+      } finally {
+        clearTimeout(timeoutId);
+        setLoading(false);
+      }
+    };
+    loadFeaturedCards();
+  }, []);
 
   const loadUsers = async () => {
     if (!SUPABASE_KEY || SUPABASE_KEY.includes('your-publishable-key')) {
@@ -229,7 +399,17 @@ export default function PokemonCardTracker() {
     try {
       setSaveStatus('Loading...');
       const data = await supabase.loadData(username);
-      if (data) { setCollection(data.collection || []); setWishlist(data.wishlist || []); setCardTags(data.card_tags || {}); setCardQuantities(data.card_quantities || {}); setAllTags(data.all_tags || []); }
+      if (data) {
+        const dedupedCollection = dedupeById(data.collection);
+        const dedupedWishlist = dedupeById(data.wishlist);
+        const normalizedQuantities = normalizeQuantities(data.card_quantities);
+        const hydratedQuantities = ensureQuantitiesForCollection(dedupedCollection, normalizedQuantities);
+        setCollection(dedupedCollection);
+        setWishlist(dedupedWishlist);
+        setCardTags(data.card_tags || {});
+        setCardQuantities(hydratedQuantities);
+        setAllTags(data.all_tags || []);
+      }
       setSaveStatus('');
     } catch (e) { setSaveStatus('Load failed'); }
   };
@@ -246,6 +426,27 @@ export default function PokemonCardTracker() {
     saveTimeoutRef.current = setTimeout(saveUserData, 1500);
     return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
   }, [collection, wishlist, cardTags, cardQuantities, allTags]);
+
+  useEffect(() => {
+    const pageCount = Math.ceil(cards.length / PAGE_SIZE);
+    if (pageCount === 0 && browsePage !== 1) setBrowsePage(1);
+    else if (pageCount > 0 && browsePage > pageCount) setBrowsePage(pageCount);
+  }, [cards.length, browsePage]);
+
+  useEffect(() => {
+    const filteredLength = getFilteredCollection().length;
+    const pageCount = Math.ceil(filteredLength / PAGE_SIZE);
+    if (pageCount === 0 && collectionPage !== 1) setCollectionPage(1);
+    else if (pageCount > 0 && collectionPage > pageCount) setCollectionPage(pageCount);
+  }, [collection, cardTags, collectionTypeFilter, collectionRarityFilter, collectionTagFilter, collectionPage]);
+
+  useEffect(() => {
+    const pageCount = Math.ceil(wishlist.length / PAGE_SIZE);
+    if (pageCount === 0 && wishlistPage !== 1) setWishlistPage(1);
+    else if (pageCount > 0 && wishlistPage > pageCount) setWishlistPage(pageCount);
+  }, [wishlist.length, wishlistPage]);
+
+  useEffect(() => { setCollectionPage(1); }, [collectionTypeFilter, collectionRarityFilter, collectionTagFilter]);
 
   const addNewUser = async (username, password, isAdmin) => {
     if (cloudConnected) { await supabase.createUser(username, password, isAdmin); }
@@ -268,7 +469,7 @@ export default function PokemonCardTracker() {
 
   const removeTagFromCard = (cardId, tag) => { setCardTags(prev => ({ ...prev, [cardId]: (prev[cardId] || []).filter(t => t !== tag) })); };
 
-  const getCardQuantity = (cardId) => cardQuantities[cardId] || 1;
+  const getCardQuantity = (cardId) => Math.max(1, parseInt(cardQuantities[cardId], 10) || 1);
 
   const setCardQuantity = (cardId, qty) => {
     const quantity = Math.max(1, parseInt(qty) || 1);
@@ -284,7 +485,14 @@ export default function PokemonCardTracker() {
   };
 
   const getTotalCards = () => {
-    return collection.reduce((sum, card) => sum + (cardQuantities[card.id] || 1), 0);
+    return collection.reduce((sum, card) => sum + (parseInt(cardQuantities[card.id], 10) || 1), 0);
+  };
+
+  const getDuplicateCount = () => {
+    return collection.reduce((sum, card) => {
+      const qty = parseInt(cardQuantities[card.id], 10) || 1;
+      return sum + Math.max(0, qty - 1);
+    }, 0);
   };
 
   const renameTag = (oldTag, newTag) => {
@@ -308,60 +516,76 @@ export default function PokemonCardTracker() {
     if (!hasQuery) { setCards(SAMPLE_CARDS); setSearchResults([]); return; }
     cancelSearch();
     abortControllerRef.current = new AbortController();
-    setLoading(true); setError('');
-    let searchDesc = [];
-    if (searchQuery.trim()) searchDesc.push(`named "${searchQuery}"`);
-    if (searchType) searchDesc.push(`${searchType} type`);
-    if (searchRarity) searchDesc.push(`${searchRarity} rarity`);
+    setLoading(true);
+    setError('');
+    let timeoutId;
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: abortControllerRef.current.signal,
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514', max_tokens: 1500, tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-          messages: [{ role: 'user', content: `Search for Pokemon TCG cards that are ${searchDesc.join(' and ')}. Find 8-10 different real cards matching ALL criteria.\n\nFor each card, include the image URL from pokemontcg.io (format: https://images.pokemontcg.io/SETID/CARDNUMBER_hires.png).\n\nReturn ONLY a JSON array:\n[{"name":"Card Name","set":"Set Name","number":"123","rarity":"Rare Holo","type":"Fire","image":"https://images.pokemontcg.io/base1/4_hires.png"}]` }]
-        })
-      });
+      const params = buildTcgParams(searchQuery, searchType, searchRarity);
+      const url = params.toString() ? `${TCGDEX_API_URL}?${params.toString()}` : TCGDEX_API_URL;
+      timeoutId = setTimeout(() => abortControllerRef.current?.abort(), 10000);
+      const res = await fetch(url, { signal: abortControllerRef.current.signal });
+      if (!res.ok) {
+        throw new Error(`Search failed (HTTP ${res.status})`);
+      }
       const data = await res.json();
-      const text = data.content?.map(i => i.text || '').join('\n') || '';
-      const match = text.replace(/```json|```/g, '').trim().match(/\[[\s\S]*?\]/);
-      if (match) {
-        const parsed = JSON.parse(match[0]);
-        const formatted = parsed.map((c, i) => ({ id: `search-${i}-${Date.now()}`, name: c.name, set: { name: c.set }, number: c.number, rarity: c.rarity, types: [c.type], image: c.image || null }));
-        setSearchResults(formatted); setCards(formatted);
-      } else setError('Could not find cards. Try different filters.');
-    } catch (e) { if (e.name !== 'AbortError') setError('Search failed. Please try again.'); }
+      const formatted = (Array.isArray(data) ? data : data?.data || []).map(formatTcgCard);
+      const enriched = await enrichCardsWithDetails(formatted, abortControllerRef.current.signal);
+      const finalCards = enriched.length > 0 ? enriched : formatted;
+      if (finalCards.length === 0) {
+        setError('No cards found. Try different filters.');
+      }
+      setSearchResults(finalCards);
+      setCards(finalCards);
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        setError('Search timed out. Please try again.');
+      } else {
+        setError(e.message || 'Search failed. Please try again.');
+      }
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
     setLoading(false);
   };
 
   const searchPrices = async (card) => {
     cancelPriceSearch();
     priceAbortRef.current = new AbortController();
-    setSearchingPrices(true); setPriceResults([]);
+    setSearchingPrices(true);
+    setPriceResults([]);
+    setPriceSummary('');
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: priceAbortRef.current.signal,
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514', max_tokens: 1500, tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-          messages: [{ role: 'user', content: `Search for prices to buy Pokemon card "${card.name}" from "${card.set?.name}". Return ONLY JSON array:\n[{"store":"TCGPlayer","price":"$45.99","url":"https://tcgplayer.com"}]` }]
-        })
-      });
-      const data = await res.json();
-      const text = data.content?.map(i => i.text || '').join('\n') || '';
-      const match = text.replace(/```json|```/g, '').trim().match(/\[[\s\S]*?\]/);
-      if (match) setPriceResults(JSON.parse(match[0])); else throw new Error('No results');
+      const detail = await fetchJson(`${TCGDEX_API_URL}/${card.id}`, priceAbortRef.current.signal);
+      const priceValue = extractUsdPriceFromCard(detail);
+      setPriceSummary(formatPrice(priceValue) || 'Price unavailable');
     } catch (e) {
       if (e.name !== 'AbortError') {
-        setPriceResults([
-          { store: 'TCGPlayer', price: 'Search →', url: `https://www.tcgplayer.com/search/pokemon/product?q=${encodeURIComponent(card.name)}` },
-          { store: 'eBay', price: 'Search →', url: `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(card.name + ' pokemon card')}` },
-        ]);
+        setPriceSummary('Price unavailable');
       }
     }
+    setPriceResults([
+      { store: 'TCGPlayer', price: 'Shop →', url: `https://www.tcgplayer.com/search/pokemon/product?q=${encodeURIComponent(card.name)}` },
+      { store: 'eBay', price: 'Shop →', url: `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(card.name + ' pokemon card')}` },
+    ]);
     setSearchingPrices(false);
   };
 
   const resetToSample = () => { setCards(SAMPLE_CARDS); setSearchResults([]); setSearchQuery(''); setSearchType(''); setSearchRarity(''); setError(''); };
-  const toggleCollection = (card) => { setCollection(prev => prev.find(c => c.id === card.id) ? prev.filter(c => c.id !== card.id) : [...prev, card]); };
+  const toggleCollection = (card) => {
+    setCollection((prev) => {
+      const exists = prev.find((c) => c.id === card.id);
+      if (exists) {
+        setCardQuantities((quantities) => {
+          const next = { ...quantities };
+          delete next[card.id];
+          return next;
+        });
+        return prev.filter((c) => c.id !== card.id);
+      }
+      setCardQuantities((quantities) => ({ ...quantities, [card.id]: quantities[card.id] || 1 }));
+      return [...prev, card];
+    });
+  };
   const toggleWishlist = (card) => { setWishlist(prev => prev.find(c => c.id === card.id) ? prev.filter(c => c.id !== card.id) : [...prev, card]); };
   const isInCollection = (id) => collection.some(c => c.id === id);
   const isInWishlist = (id) => wishlist.some(c => c.id === id);
@@ -424,6 +648,33 @@ export default function PokemonCardTracker() {
     </div>
   );
 
+  const Pagination = ({ currentPage, pageCount, onPageChange }) => {
+    if (pageCount <= 1) return null;
+    const lastPage = pageCount;
+    const visibleCount = Math.min(3, lastPage);
+    const pages = [];
+    for (let i = 1; i <= visibleCount; i += 1) pages.push(i);
+    if (lastPage > visibleCount + 1) pages.push('ellipsis');
+    if (lastPage > visibleCount) pages.push(lastPage);
+    return (
+      <div className="flex items-center justify-center gap-2 mt-4 flex-wrap">
+        {pages.map((page, index) => (
+          page === 'ellipsis' ? (
+            <span key={`ellipsis-${index}`} className="px-2 text-gray-500">...</span>
+          ) : (
+            <button
+              key={page}
+              onClick={() => onPageChange(page)}
+              className={`w-8 h-8 rounded-full text-sm font-semibold border-2 transition ${page === currentPage ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:border-blue-400'}`}
+            >
+              {page}
+            </button>
+          )
+        ))}
+      </div>
+    );
+  };
+
   const CardModal = ({ card, onClose }) => {
     const [localNewTag, setLocalNewTag] = useState('');
     const tags = cardTags[card.id] || [];
@@ -471,7 +722,8 @@ export default function PokemonCardTracker() {
                 </div>
               </div>
             )}
-            {searchingPrices ? <button onClick={cancelPriceSearch} className="w-full py-2 px-4 rounded-lg font-semibold bg-red-600 text-white flex items-center justify-center gap-2 hover:bg-red-700 transition"><StopCircle size={16} /> Stop</button> : <button onClick={() => searchPrices(card)} className="w-full py-2 px-4 rounded-lg font-semibold bg-blue-600 text-white flex items-center justify-center gap-2 hover:bg-blue-700 transition"><ShoppingCart size={16} /> Find Prices</button>}
+            {priceSummary && <div className="text-center text-sm text-gray-700 font-semibold">{priceSummary}</div>}
+            {searchingPrices ? <button onClick={cancelPriceSearch} className="w-full py-2 px-4 rounded-lg font-semibold bg-red-600 text-white flex items-center justify-center gap-2 hover:bg-red-700 transition"><StopCircle size={16} /> Stop</button> : <button onClick={() => searchPrices(card)} className="w-full py-2 px-4 rounded-lg font-semibold bg-blue-600 text-white flex items-center justify-center gap-2 hover:bg-blue-700 transition"><ShoppingCart size={16} /> Shop</button>}
             {searchingPrices && <div className="flex items-center justify-center gap-2 py-2 text-blue-600"><Loader2 className="animate-spin" size={20} /><span className="text-sm">Searching...</span></div>}
             {priceResults.length > 0 && <div className="bg-gray-100 p-3 rounded-lg space-y-2"><div className="text-gray-900 font-semibold text-sm">🛒 Where to Buy</div>{priceResults.map((r, i) => <a key={i} href={r.url} target="_blank" rel="noopener noreferrer" className="flex justify-between items-center bg-white p-2 rounded-lg hover:bg-gray-50 transition text-sm border border-gray-200"><span className="text-gray-900 font-medium">{r.store}</span><span className="flex items-center gap-1 text-green-700 font-bold">{r.price} <ExternalLink size={12} /></span></a>)}</div>}
           </div>
@@ -483,6 +735,12 @@ export default function PokemonCardTracker() {
   if (showLogin) return <LoginScreen onLogin={handleLogin} users={users} />;
 
   const filteredCollection = getFilteredCollection();
+  const browsePageCount = Math.ceil(cards.length / PAGE_SIZE);
+  const pagedBrowseCards = cards.slice((browsePage - 1) * PAGE_SIZE, browsePage * PAGE_SIZE);
+  const collectionPageCount = Math.ceil(filteredCollection.length / PAGE_SIZE);
+  const pagedCollection = filteredCollection.slice((collectionPage - 1) * PAGE_SIZE, collectionPage * PAGE_SIZE);
+  const wishlistPageCount = Math.ceil(wishlist.length / PAGE_SIZE);
+  const pagedWishlist = wishlist.slice((wishlistPage - 1) * PAGE_SIZE, wishlistPage * PAGE_SIZE);
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -517,7 +775,8 @@ export default function PokemonCardTracker() {
             </div>
             {error && <div className="mb-3 p-2 bg-red-100 border-2 border-red-300 rounded-lg text-red-800 text-sm font-medium">{error}</div>}
             {searchResults.length > 0 && !loading && <button onClick={resetToSample} className="mb-3 px-3 py-2 bg-white text-gray-700 rounded-lg hover:bg-gray-50 transition flex items-center gap-2 text-sm font-medium border-2 border-gray-300"><RefreshCw size={14} /> Back to Featured</button>}
-            {loading ? <div className="flex flex-col items-center justify-center py-12 gap-2 bg-white rounded-xl"><Loader2 className="animate-spin text-blue-600" size={40} /><p className="text-gray-700 font-medium">Searching...</p></div> : <CardGrid cardList={cards} emptyMsg="No cards found." />}
+            {loading ? <div className="flex flex-col items-center justify-center py-12 gap-2 bg-white rounded-xl"><Loader2 className="animate-spin text-blue-600" size={40} /><p className="text-gray-700 font-medium">Searching...</p></div> : <CardGrid cardList={pagedBrowseCards} emptyMsg="No cards found." />}
+            <Pagination currentPage={browsePage} pageCount={browsePageCount} onPageChange={setBrowsePage} />
           </>
         )}
         {view === 'collection' && (
@@ -525,7 +784,14 @@ export default function PokemonCardTracker() {
             {collection.length > 0 && (
               <div className="bg-white border-2 border-green-200 rounded-xl p-3 mb-4">
                 <div className="flex justify-between items-start flex-wrap gap-2">
-                  <div><div className="text-green-700 font-bold">📊 Your Collection</div><div className="text-gray-700 text-sm">Unique cards: <span className="font-bold text-green-700">{collection.length}</span> · Total with duplicates: <span className="font-bold text-blue-600">{getTotalCards()}</span></div></div>
+                  <div>
+                    <div className="text-green-700 font-bold">📊 Your Collection</div>
+                    <div className="text-gray-700 text-sm">
+                      Unique cards: <span className="font-bold text-green-700">{collection.length}</span>
+                      · Duplicates: <span className="font-bold text-blue-600">{getDuplicateCount()}</span>
+                      · Total copies: <span className="font-bold text-blue-600">{getTotalCards()}</span>
+                    </div>
+                  </div>
                   <div className="flex gap-2 flex-wrap">
                     <SelectDropdown value={collectionTypeFilter} onChange={setCollectionTypeFilter} options={TYPES} placeholder="All Types" className="w-32" />
                     <SelectDropdown value={collectionRarityFilter} onChange={setCollectionRarityFilter} options={RARITIES} placeholder="All Rarities" className="w-32" />
@@ -535,10 +801,16 @@ export default function PokemonCardTracker() {
                 {(collectionTypeFilter || collectionRarityFilter || collectionTagFilter) && <div className="mt-2 text-sm text-gray-600 border-t pt-2">Showing <span className="font-bold">{filteredCollection.length}</span> of {collection.length} <button onClick={() => { setCollectionTypeFilter(''); setCollectionRarityFilter(''); setCollectionTagFilter(''); }} className="ml-2 text-blue-600 font-medium">Clear</button></div>}
               </div>
             )}
-            <CardGrid cardList={filteredCollection} emptyMsg={collection.length ? "No cards match filters." : "Your collection is empty!"} />
+            <CardGrid cardList={pagedCollection} emptyMsg={collection.length ? "No cards match filters." : "Your collection is empty!"} />
+            <Pagination currentPage={collectionPage} pageCount={collectionPageCount} onPageChange={setCollectionPage} />
           </>
         )}
-        {view === 'wishlist' && <CardGrid cardList={wishlist} emptyMsg="Your wishlist is empty!" />}
+        {view === 'wishlist' && (
+          <>
+            <CardGrid cardList={pagedWishlist} emptyMsg="Your wishlist is empty!" />
+            <Pagination currentPage={wishlistPage} pageCount={wishlistPageCount} onPageChange={setWishlistPage} />
+          </>
+        )}
       </main>
 
       {selectedCard && <CardModal card={selectedCard} onClose={() => { setSelectedCard(null); setPriceResults([]); cancelPriceSearch(); }} />}
