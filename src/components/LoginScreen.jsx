@@ -47,7 +47,6 @@ const LoginScreen = ({ onLogin, users }) => {
           </label>
           <button onClick={handleSubmit} className="w-full py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition">Sign In</button>
         </div>
-        <p className="text-center text-gray-500 text-xs mt-4">Default: admin / admin123</p>
       </div>
     </div>
   );

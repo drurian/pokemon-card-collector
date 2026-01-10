@@ -757,7 +757,7 @@ export default function PokemonCardTracker() {
   const pagedWishlist = wishlist.slice((wishlistPage - 1) * PAGE_SIZE, wishlistPage * PAGE_SIZE);
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-blue-50">
       <header className="bg-blue-600 p-3 shadow-lg">
         <div className="flex items-center justify-between max-w-5xl mx-auto">
           <div className="flex items-center gap-2"><User size={16} className="text-white/80" /><span className="text-white/90 text-sm font-medium">{currentUser?.username}</span></div>
@@ -793,7 +793,7 @@ export default function PokemonCardTracker() {
             </div>
             {error && <div className="mb-3 p-2 bg-red-100 border-2 border-red-300 rounded-lg text-red-800 text-sm font-medium">{error}</div>}
             {searchResults.length > 0 && !loading && <button onClick={resetToSample} className="mb-3 px-3 py-2 bg-white text-gray-700 rounded-lg hover:bg-gray-50 transition flex items-center gap-2 text-sm font-medium border-2 border-gray-300"><RefreshCw size={14} /> Back to Featured</button>}
-            {searchResults.length === 0 && !loading && <div className="mb-3 text-lg font-bold text-gray-800">Featured set</div>}
+            {searchResults.length === 0 && !loading && <div className="mb-4 text-2xl font-bold text-gray-800 text-center">Featured set</div>}
             {loading ? <div className="flex flex-col items-center justify-center py-12 gap-2 bg-white rounded-xl"><Loader2 className="animate-spin text-blue-600" size={40} /><p className="text-gray-700 font-medium">Searching...</p></div> : <CardGrid cardList={pagedBrowseCards} emptyMsg="No cards found." />}
             <Pagination currentPage={browsePage} pageCount={browsePageCount} onPageChange={setBrowsePage} />
           </>
@@ -831,6 +831,7 @@ export default function PokemonCardTracker() {
           </>
         )}
       </main>
+      <footer className="mt-6 py-4 text-center text-xs text-white bg-blue-600" />
 
       {selectedCard && <CardModal card={selectedCard} onClose={() => { setSelectedCard(null); setPriceResults([]); cancelPriceSearch(); }} />}
       {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} users={users} allTags={allTags} onAddUser={addNewUser} onDeleteUser={deleteUserAccount} onRenameTag={renameTag} onDeleteTag={deleteTagGlobally} getTagColor={getTagColor} />}
