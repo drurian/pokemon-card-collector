@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { Search, Star, ShoppingCart, Heart, X, Loader2, ExternalLink, RefreshCw, StopCircle, Filter, ChevronDown, Tag, Plus, LogOut, Shield, User } from 'lucide-react';
+import pikachuSvg from './assets/pikachu.svg';
+import pokeballSvg from './assets/pokeball.svg';
+import squirtleSvg from './assets/squirtle.svg';
 import AdminPanel from './components/AdminPanel';
 import LoginScreen from './components/LoginScreen';
 import { hashPassword } from './utils/auth';
@@ -108,17 +111,11 @@ const normalizeCardImage = (card) => {
 };
 
 const PikachuIcon = ({ className }) => (
-  <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
-    <path fill="currentColor" d="M6 10L4 3l5 3 3-3 3 3 5-3-2 7a6 6 0 11-14 0z" />
-  </svg>
+  <img src={pikachuSvg} alt="" className={className} aria-hidden="true" />
 );
 
 const SquirtleIcon = ({ className }) => (
-  <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
-    <circle cx="12" cy="8" r="3.5" fill="currentColor" />
-    <circle cx="12" cy="15.5" r="6" fill="currentColor" />
-    <circle cx="12" cy="15.5" r="3.5" fill="#00000020" />
-  </svg>
+  <img src={squirtleSvg} alt="" className={className} aria-hidden="true" />
 );
 
 const extractUsdPriceFromCard = (card) => {
@@ -313,6 +310,8 @@ export default function PokemonCardTracker() {
   const [collectionTypeFilter, setCollectionTypeFilter] = useState('');
   const [collectionRarityFilter, setCollectionRarityFilter] = useState('');
   const [collectionTagFilter, setCollectionTagFilter] = useState('');
+  const [collectionSearchQuery, setCollectionSearchQuery] = useState('');
+  const [wishlistSearchQuery, setWishlistSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
 
   const abortControllerRef = useRef(null);
@@ -502,12 +501,15 @@ export default function PokemonCardTracker() {
   }, [collection, cardTags, collectionTypeFilter, collectionRarityFilter, collectionTagFilter, collectionPage]);
 
   useEffect(() => {
-    const pageCount = Math.ceil(wishlist.length / PAGE_SIZE);
+    const filteredLength = wishlist.filter((card) => !wishlistSearchQuery.trim()
+      || card.name?.toLowerCase().includes(wishlistSearchQuery.trim().toLowerCase())).length;
+    const pageCount = Math.ceil(filteredLength / PAGE_SIZE);
     if (pageCount === 0 && wishlistPage !== 1) setWishlistPage(1);
     else if (pageCount > 0 && wishlistPage > pageCount) setWishlistPage(pageCount);
-  }, [wishlist.length, wishlistPage]);
+  }, [wishlist, wishlistSearchQuery, wishlistPage]);
 
-  useEffect(() => { setCollectionPage(1); }, [collectionTypeFilter, collectionRarityFilter, collectionTagFilter]);
+  useEffect(() => { setCollectionPage(1); }, [collectionTypeFilter, collectionRarityFilter, collectionTagFilter, collectionSearchQuery]);
+  useEffect(() => { setWishlistPage(1); }, [wishlistSearchQuery]);
 
   const addNewUser = async (username, password, isAdmin) => {
     if (cloudConnected) { await supabase.createUser(username, password, isAdmin); }
@@ -652,7 +654,14 @@ export default function PokemonCardTracker() {
   const isInWishlist = (id) => wishlist.some(c => c.id === id);
   const getTypeBg = (type) => ({ Fire: 'bg-orange-700', Water: 'bg-blue-700', Grass: 'bg-green-700', Lightning: 'bg-yellow-600', Psychic: 'bg-purple-700', Fighting: 'bg-red-800', Colorless: 'bg-gray-600', Dark: 'bg-gray-800', Metal: 'bg-slate-600', Dragon: 'bg-indigo-700', Fairy: 'bg-pink-700' }[type] || 'bg-gray-700');
   const getTypeEmoji = (type) => ({ Fire: '🔥', Water: '💧', Grass: '🌿', Lightning: '⚡', Psychic: '🔮', Fighting: '👊', Colorless: '⭐', Dark: '🌙', Metal: '⚙️', Dragon: '🐉', Fairy: '✨' }[type] || '⭐');
-  const getFilteredCollection = () => collection.filter(card => (!collectionTypeFilter || card.types?.includes(collectionTypeFilter)) && (!collectionRarityFilter || card.rarity === collectionRarityFilter) && (!collectionTagFilter || (cardTags[card.id] || []).includes(collectionTagFilter)));
+  const getFilteredCollection = () => collection.filter(card => {
+    const nameMatch = !collectionSearchQuery.trim()
+      || card.name?.toLowerCase().includes(collectionSearchQuery.trim().toLowerCase());
+    return nameMatch
+      && (!collectionTypeFilter || card.types?.includes(collectionTypeFilter))
+      && (!collectionRarityFilter || card.rarity === collectionRarityFilter)
+      && (!collectionTagFilter || (cardTags[card.id] || []).includes(collectionTagFilter));
+  });
 
   const SelectDropdown = ({ value, onChange, options, placeholder, className = '' }) => (
     <div className={`relative ${className}`}>
@@ -800,18 +809,20 @@ export default function PokemonCardTracker() {
   const pagedBrowseCards = cards.slice((browsePage - 1) * PAGE_SIZE, browsePage * PAGE_SIZE);
   const collectionPageCount = Math.ceil(filteredCollection.length / PAGE_SIZE);
   const pagedCollection = filteredCollection.slice((collectionPage - 1) * PAGE_SIZE, collectionPage * PAGE_SIZE);
-  const wishlistPageCount = Math.ceil(wishlist.length / PAGE_SIZE);
-  const pagedWishlist = wishlist.slice((wishlistPage - 1) * PAGE_SIZE, wishlistPage * PAGE_SIZE);
+  const filteredWishlist = wishlist.filter((card) => !wishlistSearchQuery.trim()
+    || card.name?.toLowerCase().includes(wishlistSearchQuery.trim().toLowerCase()));
+  const wishlistPageCount = Math.ceil(filteredWishlist.length / PAGE_SIZE);
+  const pagedWishlist = filteredWishlist.slice((wishlistPage - 1) * PAGE_SIZE, wishlistPage * PAGE_SIZE);
 
   return (
     <div className="min-h-screen bg-blue-50 flex flex-col">
-      <header className="bg-blue-600 p-3 shadow-lg">
+      <header className="bg-blue-600 p-5 shadow-lg">
         <div className="flex items-center justify-between max-w-5xl mx-auto">
-          <div className="flex items-center gap-2"><User size={16} className="text-white/80" /><span className="text-white/90 text-sm font-medium">{currentUser?.username}</span></div>
-          <h1 className="text-lg font-bold text-white flex items-center gap-2">
-            <PikachuIcon className="w-7 h-7 text-white" />
+          <div className="flex items-center gap-2"><User size={16} className="text-white/80" /><span className="text-white/90 text-xl font-medium">{currentUser?.username}</span></div>
+          <h1 className="text-[1.8rem] font-bold text-white flex items-center gap-2">
+            <PikachuIcon className="w-12 h-12 text-white" />
             Pokémon Cards
-            <SquirtleIcon className="w-7 h-7 text-white" />
+            <SquirtleIcon className="w-12 h-12" />
           </h1>
           <div className="flex items-center gap-2">
             {currentUser?.is_admin && <button onClick={() => setShowAdmin(true)} className="text-white/80 hover:text-white p-1"><Shield size={18} /></button>}
@@ -859,12 +870,19 @@ export default function PokemonCardTracker() {
                     </div>
                   </div>
                   <div className="flex gap-2 flex-wrap">
+                    <input
+                      type="text"
+                      value={collectionSearchQuery}
+                      onChange={(e) => setCollectionSearchQuery(e.target.value)}
+                      placeholder="Search by name..."
+                      className="flex-1 min-w-40 px-3 py-2 rounded-lg bg-white text-gray-900 border-2 border-gray-300 focus:border-blue-500 focus:outline-none text-sm font-medium placeholder-gray-500"
+                    />
                     <SelectDropdown value={collectionTypeFilter} onChange={setCollectionTypeFilter} options={TYPES} placeholder="All Types" className="w-32" />
                     <SelectDropdown value={collectionRarityFilter} onChange={setCollectionRarityFilter} options={RARITIES} placeholder="All Rarities" className="w-32" />
                     {allTags.length > 0 && <SelectDropdown value={collectionTagFilter} onChange={setCollectionTagFilter} options={allTags} placeholder="All Tags" className="w-32" />}
                   </div>
                 </div>
-                {(collectionTypeFilter || collectionRarityFilter || collectionTagFilter) && <div className="mt-2 text-sm text-gray-600 border-t pt-2">Showing <span className="font-bold">{filteredCollection.length}</span> of {collection.length} <button onClick={() => { setCollectionTypeFilter(''); setCollectionRarityFilter(''); setCollectionTagFilter(''); }} className="ml-2 text-blue-600 font-medium">Clear</button></div>}
+                {(collectionTypeFilter || collectionRarityFilter || collectionTagFilter || collectionSearchQuery) && <div className="mt-2 text-sm text-gray-600 border-t pt-2">Showing <span className="font-bold">{filteredCollection.length}</span> of {collection.length} <button onClick={() => { setCollectionTypeFilter(''); setCollectionRarityFilter(''); setCollectionTagFilter(''); setCollectionSearchQuery(''); }} className="ml-2 text-blue-600 font-medium">Clear</button></div>}
               </div>
             )}
             <CardGrid cardList={pagedCollection} emptyMsg={collection.length ? "No cards match filters." : "Your collection is empty!"} />
@@ -873,12 +891,25 @@ export default function PokemonCardTracker() {
         )}
         {view === 'wishlist' && (
           <>
+            {wishlist.length > 0 && (
+              <div className="mb-3">
+                <input
+                  type="text"
+                  value={wishlistSearchQuery}
+                  onChange={(e) => setWishlistSearchQuery(e.target.value)}
+                  placeholder="Search wishlist by name..."
+                  className="w-full px-3 py-2 rounded-lg bg-white text-gray-900 border-2 border-gray-300 focus:border-blue-500 focus:outline-none text-sm font-medium placeholder-gray-500"
+                />
+              </div>
+            )}
             <CardGrid cardList={pagedWishlist} emptyMsg="Your wishlist is empty!" />
             <Pagination currentPage={wishlistPage} pageCount={wishlistPageCount} onPageChange={setWishlistPage} />
           </>
         )}
       </main>
-      <footer className="mt-auto py-4 text-center text-xs text-white bg-blue-600" />
+      <footer className="mt-auto py-4 text-center text-xs text-white bg-blue-600 flex items-center justify-center">
+        <img src={pokeballSvg} alt="" className="w-8 h-8" style={{ filter: 'brightness(0) invert(1)' }} aria-hidden="true" />
+      </footer>
 
       {selectedCard && <CardModal card={selectedCard} onClose={() => { setSelectedCard(null); setPriceResults([]); cancelPriceSearch(); }} />}
       {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} users={users} allTags={allTags} onAddUser={addNewUser} onDeleteUser={deleteUserAccount} onRenameTag={renameTag} onDeleteTag={deleteTagGlobally} getTagColor={getTagColor} />}
