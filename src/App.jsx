@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Search, Star, ShoppingCart, Heart, X, Loader2, ExternalLink, RefreshCw, StopCircle, Filter, ChevronDown, Tag, Plus, LogOut, Shield, User } from 'lucide-react';
+import cardBackSvg from './assets/card-back.svg';
 import pikachuSvg from './assets/pikachu.svg';
 import pokeballSvg from './assets/pokeball.svg';
 import squirtleSvg from './assets/squirtle.svg';
@@ -62,6 +63,15 @@ const getTagColor = (tagName) => {
 const normalizeQuantities = (quantities) => Object.fromEntries(
   Object.entries(quantities || {}).map(([id, qty]) => [id, Math.max(1, parseInt(qty, 10) || 1)])
 );
+
+const getCardImageSrc = (card) => card?.image || cardBackSvg;
+
+const handleCardImageError = (event) => {
+  const img = event.currentTarget;
+  if (img.dataset.fallbackApplied === 'true') return;
+  img.dataset.fallbackApplied = 'true';
+  img.src = cardBackSvg;
+};
 
 const ensureQuantitiesForCollection = (collectionItems, quantities) => {
   const updated = { ...(quantities || {}) };
@@ -778,17 +788,20 @@ export default function PokemonCardTracker() {
       ) : cardList.map(card => {
         const qty = getCardQuantity(card.id);
         const inCollection = isInCollection(card.id);
+        const hasImage = Boolean(card.image);
         return (
           <div key={card.id} className="relative cursor-pointer" onClick={() => { setSelectedCard(card); setPriceResults([]); }}>
             <div className={`${getTypeBg(card.types?.[0])} rounded-xl shadow-md hover:shadow-xl transition-all hover:scale-105 border-2 border-white/20`}>
-              <div className="bg-white rounded-lg m-1 aspect-[2.5/3.5] flex flex-col items-center justify-center overflow-hidden">
-                {card.image ? <img src={card.image} alt={card.name} className="w-full h-full object-contain" onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }} /> : null}
-                <div className={`text-center p-2 flex-col justify-center items-center ${card.image ? 'hidden' : 'flex'} h-full w-full`}>
-                  <div className="text-2xl mb-1">{getTypeEmoji(card.types?.[0])}</div>
-                  <div className="text-gray-900 font-bold text-xs leading-tight">{card.name}</div>
-                  <div className="text-gray-600 text-xs mt-0.5">{card.set?.name}</div>
-                  <div className="text-amber-600 font-semibold text-xs">{card.rarity}</div>
-                </div>
+              <div className="bg-white rounded-lg m-1 aspect-[2.5/3.5] flex flex-col items-center justify-center overflow-hidden relative">
+                <img src={getCardImageSrc(card)} alt={card.name} className="w-full h-full object-contain" onError={handleCardImageError} />
+                {!hasImage && (
+                  <div className="absolute inset-0 text-center p-2 flex flex-col justify-center items-center">
+                    <div className="text-2xl mb-1">{getTypeEmoji(card.types?.[0])}</div>
+                    <div className="text-gray-900 font-bold text-xs leading-tight">{card.name}</div>
+                    <div className="text-gray-600 text-xs mt-0.5">{card.set?.name}</div>
+                    <div className="text-amber-600 font-semibold text-xs">{card.rarity}</div>
+                  </div>
+                )}
               </div>
             </div>
             <div className="absolute top-2 right-2 flex gap-1">
@@ -844,7 +857,7 @@ export default function PokemonCardTracker() {
             <button onClick={onClose} className="text-white/80 hover:text-white bg-black/20 rounded-full p-1"><X size={20} /></button>
           </div>
           <div className="p-4 space-y-3">
-            {card.image && <div className="flex justify-center"><img src={card.image} alt={card.name} className="w-48 rounded-lg shadow-lg" onError={(e) => { e.target.style.display = 'none'; }} /></div>}
+            <div className="flex justify-center"><img src={getCardImageSrc(card)} alt={card.name} className="w-48 rounded-lg shadow-lg" onError={handleCardImageError} /></div>
             <div className="grid grid-cols-2 gap-2 text-sm">
               <div className="bg-gray-100 p-2 rounded-lg"><span className="text-gray-500 block text-xs">Set</span><span className="text-gray-900 font-medium">{card.set?.name}</span></div>
               <div className="bg-gray-100 p-2 rounded-lg"><span className="text-gray-500 block text-xs">Number</span><span className="text-gray-900 font-medium">#{card.number}</span></div>

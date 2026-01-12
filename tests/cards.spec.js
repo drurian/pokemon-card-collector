@@ -2,6 +2,25 @@ import { test, expect } from '@playwright/test';
 
 test('shows cards with images and modal details after admin login', async ({ page }) => {
   const consoleErrors = [];
+  const mockCards = [
+    {
+      id: 'test-1',
+      name: 'River Spark',
+      set: { name: 'Mock Set' },
+      number: '1',
+      rarity: 'Common',
+      types: ['Water'],
+      image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+Z2a8AAAAASUVORK5CYII='
+    },
+    {
+      id: 'test-2',
+      name: 'No Image',
+      set: { name: 'Mock Set' },
+      number: '2',
+      rarity: 'Rare',
+      types: ['Fire']
+    }
+  ];
 
   page.on('console', (msg) => {
     if (msg.type() === 'error') {
@@ -10,6 +29,29 @@ test('shows cards with images and modal details after admin login', async ({ pag
   });
   page.on('pageerror', (err) => {
     consoleErrors.push(err.message);
+  });
+
+  await page.route('https://api.tcgdex.net/**', (route) => {
+    const url = route.request().url();
+    if (url.endsWith('/v2/en/sets')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([{ id: 'test-set', releaseDate: '2024-01-01' }])
+      });
+    }
+    if (url.includes('/v2/en/sets/test-set')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ cards: mockCards })
+      });
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([])
+    });
   });
 
   await page.goto('/');
@@ -42,7 +84,10 @@ test('shows cards with images and modal details after admin login', async ({ pag
     throw new Error('Login failed for admin/admin123');
   }
 
-  const card = page.locator('main .relative.cursor-pointer').first();
+  const cards = page.locator('main .relative.cursor-pointer');
+  await expect(cards).toHaveCount(2);
+
+  const card = cards.first();
   await expect(card).toBeVisible();
 
   const cardImg = card.locator('img').first();
@@ -50,6 +95,16 @@ test('shows cards with images and modal details after admin login', async ({ pag
   await expect
     .poll(() => cardImg.evaluate((el) => el.naturalWidth))
     .toBeGreaterThan(0);
+  await cardImg.evaluate((img) => { img.src = '/broken-image.png'; });
+  await expect
+    .poll(() => cardImg.getAttribute('src'))
+    .toContain('card-back');
+
+  const cardWithoutImage = cards.nth(1);
+  const fallbackImg = cardWithoutImage.locator('img').first();
+  await expect
+    .poll(() => fallbackImg.getAttribute('src'))
+    .toContain('card-back');
 
   await card.click();
 
