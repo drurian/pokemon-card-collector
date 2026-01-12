@@ -18,6 +18,7 @@ const TCGDEX_API_URL = 'https://api.tcgdex.net/v2/en/cards';
 const TCGDEX_SETS_URL = 'https://api.tcgdex.net/v2/en/sets';
 
 const SESSION_STORAGE_KEY = 'pokemon-collector-session';
+const AVATAR_STORAGE_PREFIX = 'pokemon-collector-avatar:';
 const PAGE_SIZE = 12;
 
 const LEGACY_DEFAULT_ADMIN_HASHES = [
@@ -78,6 +79,18 @@ const dedupeById = (items) => {
     seen.add(item.id);
     return true;
   });
+};
+
+const getStoredAvatar = (username) => {
+  if (!username) return '';
+  return localStorage.getItem(`${AVATAR_STORAGE_PREFIX}${username}`) || '';
+};
+
+const storeAvatar = (username, avatarUrl) => {
+  if (!username) return;
+  const key = `${AVATAR_STORAGE_PREFIX}${username}`;
+  if (avatarUrl) localStorage.setItem(key, avatarUrl);
+  else localStorage.removeItem(key);
 };
 
 const buildTcgParams = (name, type, rarity) => {
@@ -204,6 +217,14 @@ const supabase = {
       method: 'PATCH',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({ password })
+    });
+    return res.json();
+  },
+  async updateUser(username, updates) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/pokemon_users?username=eq.${username}`, {
+      method: 'PATCH',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify(updates)
     });
     return res.json();
   },
@@ -413,7 +434,8 @@ export default function PokemonCardTracker() {
   const loadUsers = async () => {
     if (!SUPABASE_KEY || SUPABASE_KEY.includes('your-publishable-key')) {
       const hashedPw = await hashPassword(DEFAULT_ADMIN.password);
-      setUsers([{ username: DEFAULT_ADMIN.username, password: hashedPw, is_admin: true }]);
+      const localAvatar = getStoredAvatar(DEFAULT_ADMIN.username);
+      setUsers([{ username: DEFAULT_ADMIN.username, password: hashedPw, is_admin: true, avatar_url: localAvatar || undefined }]);
       return;
     }
     try {
@@ -426,7 +448,11 @@ export default function PokemonCardTracker() {
           console.log('Admin may already exist:', createErr);
         }
         const refreshedData = await supabase.getUsers();
-        setUsers(refreshedData || [{ username: DEFAULT_ADMIN.username, password: hashedPw, is_admin: true }]);
+        const baseUsers = refreshedData || [{ username: DEFAULT_ADMIN.username, password: hashedPw, is_admin: true }];
+        setUsers(baseUsers.map((user) => ({
+          ...user,
+          avatar_url: user.avatar_url != null ? user.avatar_url : getStoredAvatar(user.username) || undefined
+        })));
       } else {
         const hashedPw = await hashPassword(DEFAULT_ADMIN.password);
         const adminUser = data.find((user) => user.username === DEFAULT_ADMIN.username);
@@ -436,20 +462,30 @@ export default function PokemonCardTracker() {
             const updatedUsers = data.map((user) => (
               user.username === DEFAULT_ADMIN.username ? { ...user, password: hashedPw } : user
             ));
-            setUsers(updatedUsers);
+            setUsers(updatedUsers.map((user) => ({
+              ...user,
+              avatar_url: user.avatar_url != null ? user.avatar_url : getStoredAvatar(user.username) || undefined
+            })));
           } catch (updateErr) {
             console.log('Failed to update admin password hash:', updateErr);
-            setUsers(data);
+            setUsers(data.map((user) => ({
+              ...user,
+              avatar_url: user.avatar_url != null ? user.avatar_url : getStoredAvatar(user.username) || undefined
+            })));
           }
         } else {
-          setUsers(data);
+          setUsers(data.map((user) => ({
+            ...user,
+            avatar_url: user.avatar_url != null ? user.avatar_url : getStoredAvatar(user.username) || undefined
+          })));
         }
       }
       setCloudConnected(true);
     } catch (e) {
       console.error('Failed to load users:', e);
       const hashedPw = await hashPassword(DEFAULT_ADMIN.password);
-      setUsers([{ username: DEFAULT_ADMIN.username, password: hashedPw, is_admin: true }]);
+      const localAvatar = getStoredAvatar(DEFAULT_ADMIN.username);
+      setUsers([{ username: DEFAULT_ADMIN.username, password: hashedPw, is_admin: true, avatar_url: localAvatar || undefined }]);
     }
   };
 
@@ -547,6 +583,28 @@ export default function PokemonCardTracker() {
     if (!confirm(`Delete user "${username}" and all their data?`)) return;
     if (cloudConnected) { await supabase.deleteUser(username); }
     setUsers(users.filter(u => u.username !== username));
+  };
+
+  const updateUserAccount = async (username, updates) => {
+    if (!username) return;
+    const avatarValue = updates.avatar_url === '' ? null : updates.avatar_url;
+    const payload = {
+      ...(updates.password ? { password: updates.password } : {}),
+      ...(typeof updates.is_admin === 'boolean' ? { is_admin: updates.is_admin } : {}),
+      ...(updates.avatar_url !== undefined ? { avatar_url: avatarValue } : {})
+    };
+    if (cloudConnected && Object.keys(payload).length > 0) {
+      await supabase.updateUser(username, payload);
+    }
+    if (updates.avatar_url !== undefined) {
+      storeAvatar(username, avatarValue || '');
+    }
+    setUsers((prev) => prev.map((user) => (
+      user.username === username ? { ...user, ...payload } : user
+    )));
+    setCurrentUser((prev) => (
+      prev?.username === username ? { ...prev, ...payload } : prev
+    ));
   };
 
   const addTagToCard = (cardId, tag) => {
@@ -844,15 +902,42 @@ export default function PokemonCardTracker() {
     <div className="min-h-screen bg-blue-50 flex flex-col">
       <header className="bg-blue-600 p-5 shadow-lg">
         <div className="flex items-center justify-between max-w-5xl mx-auto">
-          <div className="flex items-center gap-2"><User size={16} className="text-white/80" /><span className="text-white/90 text-xl font-medium">{currentUser?.username}</span></div>
+          <div className="flex items-center gap-2">
+            {currentUser?.avatar_url ? (
+              <img
+                src={currentUser.avatar_url}
+                alt={`${currentUser.username} avatar`}
+                className="w-7 h-7 rounded-full object-cover border border-white/30"
+              />
+            ) : (
+              <User size={16} className="text-white/80" />
+            )}
+            <span className="text-white/90 text-xl font-medium">{currentUser?.username}</span>
+          </div>
           <h1 className="text-[1.8rem] font-bold text-white flex items-center gap-2">
             <PikachuIcon className="w-12 h-12 text-white" />
             Pokémon Cards
             <SquirtleIcon className="w-12 h-12" />
           </h1>
           <div className="flex items-center gap-2">
-            {currentUser?.is_admin && <button onClick={() => setShowAdmin(true)} className="text-white/80 hover:text-white p-1"><Shield size={18} /></button>}
-            <button onClick={handleLogout} className="text-white/80 hover:text-white p-1"><LogOut size={18} /></button>
+            {currentUser?.is_admin && (
+              <button
+                onClick={() => setShowAdmin(true)}
+                className="text-white/80 hover:text-white p-1"
+                aria-label="Open admin panel"
+                data-testid="open-admin-panel"
+              >
+                <Shield size={18} />
+              </button>
+            )}
+            <button
+              onClick={handleLogout}
+              className="text-white/80 hover:text-white p-1"
+              aria-label="Log out"
+              data-testid="logout"
+            >
+              <LogOut size={18} />
+            </button>
           </div>
         </div>
         {saveStatus && <div className="text-center text-white/90 text-xs mt-1">{saveStatus}</div>}
@@ -860,7 +945,15 @@ export default function PokemonCardTracker() {
 
       <nav className="flex justify-center gap-2 p-3 bg-white shadow flex-wrap">
         {[{ id: 'browse', label: 'Browse', icon: Search }, { id: 'collection', label: `Collection (${collection.length})`, icon: Star }, { id: 'wishlist', label: `Wishlist (${wishlist.length})`, icon: Heart }].map(tab => (
-          <button key={tab.id} onClick={() => setView(tab.id)} className={`px-4 py-2 rounded-full font-semibold flex items-center gap-2 transition text-sm border-2 ${view === tab.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:border-blue-400'}`}><tab.icon size={14} /> {tab.label}</button>
+          <button
+            key={tab.id}
+            onClick={() => setView(tab.id)}
+            className={`px-4 py-2 rounded-full font-semibold flex items-center gap-2 transition text-sm border-2 ${view === tab.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:border-blue-400'}`}
+            aria-label={`${tab.id} tab`}
+            data-testid={`nav-tab-${tab.id}`}
+          >
+            <tab.icon size={14} /> {tab.label}
+          </button>
         ))}
       </nav>
 
@@ -870,8 +963,31 @@ export default function PokemonCardTracker() {
             <div className="space-y-2 mb-4">
               <div className="flex gap-2">
                 <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && !loading && searchCardsWithAI()} placeholder="Search by name..." className="flex-1 px-3 py-2 rounded-lg bg-white text-gray-900 border-2 border-gray-300 focus:border-blue-500 focus:outline-none text-sm font-medium placeholder-gray-500" />
-                <button onClick={() => setShowFilters(!showFilters)} className={`px-3 py-2 rounded-lg transition text-sm border-2 ${showFilters ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300'}`}><Filter size={18} /></button>
-                {loading ? <button onClick={cancelSearch} className="px-4 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition flex items-center gap-1 text-sm"><StopCircle size={16} /> Stop</button> : <button onClick={searchCardsWithAI} className="px-4 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition flex items-center gap-1 text-sm"><Search size={16} /> Search</button>}
+                <button
+                  onClick={() => setShowFilters(!showFilters)}
+                  className={`px-3 py-2 rounded-lg transition text-sm border-2 ${showFilters ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300'}`}
+                  aria-label="Toggle filters"
+                  data-testid="toggle-filters"
+                >
+                  <Filter size={18} />
+                </button>
+                {loading ? (
+                  <button
+                    onClick={cancelSearch}
+                    className="px-4 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition flex items-center gap-1 text-sm"
+                    data-testid="stop-search"
+                  >
+                    <StopCircle size={16} /> Stop
+                  </button>
+                ) : (
+                  <button
+                    onClick={searchCardsWithAI}
+                    className="px-4 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition flex items-center gap-1 text-sm"
+                    data-testid="search"
+                  >
+                    <Search size={16} /> Search
+                  </button>
+                )}
               </div>
               {showFilters && <div className="flex gap-2 flex-wrap bg-white p-3 rounded-lg border-2 border-gray-200"><SelectDropdown value={searchType} onChange={setSearchType} options={TYPES} placeholder="Any Type" className="flex-1 min-w-28" /><SelectDropdown value={searchRarity} onChange={setSearchRarity} options={RARITIES} placeholder="Any Rarity" className="flex-1 min-w-28" /></div>}
             </div>
@@ -938,7 +1054,7 @@ export default function PokemonCardTracker() {
       </footer>
 
       {selectedCard && <CardModal card={selectedCard} onClose={() => { setSelectedCard(null); setPriceResults([]); cancelPriceSearch(); }} />}
-      {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} users={users} allTags={allTags} onAddUser={addNewUser} onDeleteUser={deleteUserAccount} onRenameTag={renameTag} onDeleteTag={deleteTagGlobally} getTagColor={getTagColor} />}
+      {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} users={users} allTags={allTags} onAddUser={addNewUser} onDeleteUser={deleteUserAccount} onUpdateUser={updateUserAccount} onRenameTag={renameTag} onDeleteTag={deleteTagGlobally} getTagColor={getTagColor} />}
     </div>
   );
 }
