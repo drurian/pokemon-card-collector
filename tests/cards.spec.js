@@ -95,16 +95,16 @@ test('shows cards with images and modal details after admin login', async ({ pag
   await expect
     .poll(() => cardImg.evaluate((el) => el.naturalWidth))
     .toBeGreaterThan(0);
-  await cardImg.evaluate((img) => { img.src = '/broken-image.png'; });
+  await cardImg.evaluate((img) => { img.dispatchEvent(new Event('error')); });
   await expect
     .poll(() => cardImg.getAttribute('src'))
-    .toContain('card-back');
+    .toMatch(/svg\+xml/);
 
   const cardWithoutImage = cards.nth(1);
   const fallbackImg = cardWithoutImage.locator('img').first();
   await expect
     .poll(() => fallbackImg.getAttribute('src'))
-    .toContain('card-back');
+    .toMatch(/svg\+xml/);
 
   await card.click();
 
