@@ -1,7 +1,12 @@
 import { test, expect } from '@playwright/test';
 
-const login = async (page, username, password) => {
-  await page.goto('/');
+const login = async (page, username, password, { navigate = true } = {}) => {
+  if (navigate) {
+    await page.addInitScript(() => {
+      localStorage.clear();
+    });
+    await page.goto('/');
+  }
   await expect(
     page.getByRole('heading', { name: 'Pokémon Card Collector' })
   ).toBeVisible();
@@ -30,10 +35,29 @@ const login = async (page, username, password) => {
   }
 };
 
+const openAdminPanel = async (page) => {
+  await page.getByTestId('open-admin-panel').click();
+  const adminPanel = page.locator('.fixed.inset-0').filter({
+    has: page.getByRole('heading', { name: 'Admin Panel' })
+  });
+  await expect(adminPanel).toBeVisible();
+  return adminPanel;
+};
+
+const getTabCount = async (locator) => {
+  const text = await locator.textContent();
+  const match = text ? text.match(/\((\d+)\)/) : null;
+  return match ? parseInt(match[1], 10) : 0;
+};
+
 test('updates quantity and summary counts', async ({ page }) => {
   const adminHash = await (async () => {
     const { createHash } = await import('node:crypto');
     return createHash('sha256').update('admin123').digest('hex');
+  })();
+  const quantityUserHash = await (async () => {
+    const { createHash } = await import('node:crypto');
+    return createHash('sha256').update('quantity123').digest('hex');
   })();
 
   const featuredCards = [
@@ -79,35 +103,54 @@ test('updates quantity and summary counts', async ({ page }) => {
     });
   });
 
-  await page.route('**/rest/v1/**', (route) => {
-    const url = route.request().url();
-    if (url.includes('/pokemon_users')) {
-      return route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify([{ username: 'admin', password: adminHash, is_admin: true }])
-      });
-    }
-    return route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify([])
-    });
-  });
+  await page.route('**/rest/v1/pokemon_users**', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify([
+      { username: 'admin', password: adminHash, is_admin: true },
+      { username: 'quantity-user', password: quantityUserHash, is_admin: false }
+    ])
+  }));
+
+  await page.route('**/rest/v1/**', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify([])
+  }));
 
   await login(page, 'admin', 'admin123');
+
+  const adminPanel = await openAdminPanel(page);
+  await adminPanel.getByPlaceholder('Username').fill('quantity-user');
+  await adminPanel.getByPlaceholder('Password').fill('quantity123');
+  await adminPanel.getByTestId('add-user').click();
+  await expect(adminPanel.getByTestId('user-row-quantity-user')).toBeVisible();
+  await page.getByTestId('admin-panel-close').click();
+
+  await page.getByTestId('logout').click();
+  await login(page, 'quantity-user', 'quantity123', { navigate: false });
+
+  const collectionTab = page.getByTestId('nav-tab-collection');
 
   const cards = page.locator('main .relative.cursor-pointer');
   await expect(cards).toHaveCount(2);
 
   await cards.first().click();
-  await page.getByRole('button', { name: 'Add to Collection' }).click();
   const modal = page.locator('.fixed.inset-0');
+  await expect(modal).toBeVisible();
+  const collectedButton = page.getByRole('button', { name: 'Collected ✓' });
+  if (await collectedButton.count()) {
+    await collectedButton.click();
+  }
+  const collectionBaseline = await getTabCount(collectionTab);
+  await page.getByRole('button', { name: 'Add to Collection' }).click();
   await modal.click({ position: { x: 10, y: 10 } });
   await expect(modal).toBeHidden();
 
   await page.getByTestId('nav-tab-collection').click();
-  await expect(page.getByTestId('nav-tab-collection')).toContainText('(1)');
+  await expect
+    .poll(() => getTabCount(collectionTab))
+    .toBe(collectionBaseline + 1);
 
   await cards.first().click();
   const decrement = page.getByRole('button', { name: '−' });

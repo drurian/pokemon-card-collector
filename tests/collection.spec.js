@@ -1,6 +1,9 @@
 import { test, expect } from '@playwright/test';
 
 const login = async (page, username, password) => {
+  await page.addInitScript(() => {
+    localStorage.clear();
+  });
   await page.goto('/');
   await expect(
     page.getByRole('heading', { name: 'Pokémon Card Collector' })
@@ -30,7 +33,18 @@ const login = async (page, username, password) => {
   }
 };
 
+const getTabCount = async (locator) => {
+  const text = await locator.textContent();
+  const match = text ? text.match(/\((\d+)\)/) : null;
+  return match ? parseInt(match[1], 10) : 0;
+};
+
 test('can search, add to collection, and add to wishlist', async ({ page }) => {
+  const adminHash = await (async () => {
+    const { createHash } = await import('node:crypto');
+    return createHash('sha256').update('admin123').digest('hex');
+  })();
+
   const mockCards = [
     {
       id: 'test-1',
@@ -81,8 +95,26 @@ test('can search, add to collection, and add to wishlist', async ({ page }) => {
     });
   });
 
+  await page.route('**/rest/v1/**', (route) => {
+    const url = route.request().url();
+    if (url.includes('/pokemon_users')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([{ username: 'admin', password: adminHash, is_admin: true }])
+      });
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([])
+    });
+  });
+
   await login(page, 'admin', 'admin123');
 
+  const collectionTab = page.getByTestId('nav-tab-collection');
+  const wishlistTab = page.getByTestId('nav-tab-wishlist');
   const searchInput = page.getByPlaceholder('Search by name...');
   await searchInput.fill('River');
   await page.getByRole('button', { name: 'Search' }).click();
@@ -92,10 +124,27 @@ test('can search, add to collection, and add to wishlist', async ({ page }) => {
   await expect(cards).toHaveCount(2);
 
   await cards.first().click();
+  const modal = page.locator('.fixed.inset-0');
+  await expect(modal).toBeVisible();
+  const collectedButton = page.getByRole('button', { name: 'Collected ✓' });
+  if (await collectedButton.count()) {
+    await collectedButton.click();
+  }
+  const wantedButton = page.getByRole('button', { name: 'Wanted ✓' });
+  if (await wantedButton.count()) {
+    await wantedButton.click();
+  }
+  const collectionBaseline = await getTabCount(collectionTab);
+  const wishlistBaseline = await getTabCount(wishlistTab);
   await page.getByRole('button', { name: 'Add to Collection' }).click();
   await page.getByRole('button', { name: 'Add to Wishlist' }).click();
-  await page.locator('.fixed.inset-0').click();
+  await modal.click({ position: { x: 10, y: 10 } });
+  await expect(modal).toBeHidden();
 
-  await expect(page.getByTestId('nav-tab-collection')).toContainText('(1)');
-  await expect(page.getByTestId('nav-tab-wishlist')).toContainText('(1)');
+  await expect
+    .poll(() => getTabCount(collectionTab))
+    .toBe(collectionBaseline + 1);
+  await expect
+    .poll(() => getTabCount(wishlistTab))
+    .toBe(wishlistBaseline + 1);
 });

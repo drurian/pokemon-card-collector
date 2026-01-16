@@ -1,3 +1,19 @@
+/**
+ * SECURITY NOTE: This Supabase implementation uses client-side password hashing
+ * with SHA-256, which is not ideal for production. For better security:
+ * 
+ * 1. Migrate to Supabase Auth (https://supabase.com/docs/guides/auth)
+ *    - Handles password hashing server-side with bcrypt
+ *    - Provides JWT-based session management
+ *    - Includes email verification, password reset, etc.
+ * 
+ * 2. Or use Edge Functions for authentication
+ *    - Create a server-side login endpoint
+ *    - Hash passwords with bcrypt on the server
+ * 
+ * The local backend (localApi.js) now uses proper bcrypt hashing server-side.
+ */
+
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
 

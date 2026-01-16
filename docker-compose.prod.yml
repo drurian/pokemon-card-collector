@@ -1,0 +1,54 @@
+services:
+  web:
+    image: ghcr.io/your-org/pokemon-collector-web:latest
+    ports:
+      - "4173:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  api:
+    image: ghcr.io/your-org/pokemon-collector-api:latest
+    environment:
+      PORT: 3001
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: pokemon
+      DB_PASSWORD: pokemon
+      DB_NAME: pokemon_collector
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: admin123
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: pokemon_collector
+      MARIADB_USER: pokemon
+      MARIADB_PASSWORD: pokemon
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./server/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "127.0.0.1", "-u", "root", "-proot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    environment:
+      WATCHTOWER_POLL_INTERVAL: 300
+      WATCHTOWER_CLEANUP: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+volumes:
+  db_data:

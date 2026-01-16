@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { DEFAULT_ADMIN, LEGACY_DEFAULT_ADMIN_HASHES } from '../constants/admin';
 import { hashPassword } from '../utils/auth';
 import { SESSION_STORAGE_KEY, getStoredAvatar, storeAvatar } from '../utils/storage';
-import { hasSupabaseCredentials, supabase } from '../services/supabase';
+import { dataClient, hasDataBackend, supportsServerAuth } from '../services/dataClient';
 
 const buildUserAvatar = (user) => ({
   ...user,
@@ -18,7 +18,7 @@ export default function useAuthUsers() {
 
   useEffect(() => {
     const loadUsers = async () => {
-      if (!hasSupabaseCredentials) {
+      if (!hasDataBackend) {
         setCloudConnected(false);
         const hashedPw = await hashPassword(DEFAULT_ADMIN.password);
         const localAvatar = getStoredAvatar(DEFAULT_ADMIN.username);
@@ -26,29 +26,38 @@ export default function useAuthUsers() {
         return;
       }
       try {
-        const data = await supabase.getUsers();
+        const data = await dataClient.getUsers();
         if (!data || data.length === 0 || data.error) {
-          const hashedPw = await hashPassword(DEFAULT_ADMIN.password);
+          // For local backend, send plain password - server will hash
+          // For Supabase, send pre-hashed password (legacy behavior)
+          const passwordToSend = supportsServerAuth
+            ? DEFAULT_ADMIN.password
+            : await hashPassword(DEFAULT_ADMIN.password);
           try {
-            await supabase.createUser(DEFAULT_ADMIN.username, hashedPw, true);
+            await dataClient.createUser(DEFAULT_ADMIN.username, passwordToSend, true);
           } catch (createErr) {
             console.log('Admin may already exist:', createErr);
           }
-          const refreshedData = await supabase.getUsers();
-          const baseUsers = refreshedData || [{ username: DEFAULT_ADMIN.username, password: hashedPw, is_admin: true }];
+          const refreshedData = await dataClient.getUsers();
+          const baseUsers = refreshedData || [{ username: DEFAULT_ADMIN.username, is_admin: true }];
           setUsers(baseUsers.map(buildUserAvatar));
         } else {
-          const hashedPw = await hashPassword(DEFAULT_ADMIN.password);
-          const adminUser = data.find((user) => user.username === DEFAULT_ADMIN.username);
-          if (adminUser && LEGACY_DEFAULT_ADMIN_HASHES.includes(adminUser.password) && adminUser.password !== hashedPw) {
-            try {
-              await supabase.updateUserPassword(DEFAULT_ADMIN.username, hashedPw);
-              const updatedUsers = data.map((user) => (
-                user.username === DEFAULT_ADMIN.username ? { ...user, password: hashedPw } : user
-              ));
-              setUsers(updatedUsers.map(buildUserAvatar));
-            } catch (updateErr) {
-              console.log('Failed to update admin password hash:', updateErr);
+          // Only do legacy hash migration for Supabase (local backend handles this server-side)
+          if (!supportsServerAuth) {
+            const hashedPw = await hashPassword(DEFAULT_ADMIN.password);
+            const adminUser = data.find((user) => user.username === DEFAULT_ADMIN.username);
+            if (adminUser && LEGACY_DEFAULT_ADMIN_HASHES.includes(adminUser.password) && adminUser.password !== hashedPw) {
+              try {
+                await dataClient.updateUserPassword(DEFAULT_ADMIN.username, hashedPw);
+                const updatedUsers = data.map((user) => (
+                  user.username === DEFAULT_ADMIN.username ? { ...user, password: hashedPw } : user
+                ));
+                setUsers(updatedUsers.map(buildUserAvatar));
+              } catch (updateErr) {
+                console.log('Failed to update admin password hash:', updateErr);
+                setUsers(data.map(buildUserAvatar));
+              }
+            } else {
               setUsers(data.map(buildUserAvatar));
             }
           } else {
@@ -107,9 +116,13 @@ export default function useAuthUsers() {
   const addNewUser = async (username, password, isAdmin) => {
     if (!username || !password) return;
     if (cloudConnected) {
-      await supabase.createUser(username, password, isAdmin);
+      // For local backend, send plain password - server will hash with bcrypt
+      // For Supabase, we still need to hash client-side (legacy)
+      const passwordToSend = supportsServerAuth ? password : await hashPassword(password);
+      await dataClient.createUser(username, passwordToSend, isAdmin);
     }
-    setUsers((prev) => [...prev, { username, password, is_admin: isAdmin }]);
+    const storedPassword = supportsServerAuth ? undefined : await hashPassword(password);
+    setUsers((prev) => [...prev, { username, ...(storedPassword ? { password: storedPassword } : {}), is_admin: isAdmin }]);
   };
 
   const deleteUserAccount = async (username) => {
@@ -119,7 +132,7 @@ export default function useAuthUsers() {
     }
     if (!confirm(`Delete user "${username}" and all their data?`)) return;
     if (cloudConnected) {
-      await supabase.deleteUser(username);
+      await dataClient.deleteUser(username);
     }
     setUsers((prev) => prev.filter((user) => user.username !== username));
   };
@@ -127,22 +140,34 @@ export default function useAuthUsers() {
   const updateUserAccount = async (username, updates) => {
     if (!username) return;
     const avatarValue = updates.avatar_url === '' ? null : updates.avatar_url;
+
+    // For password updates: local backend receives plain password, Supabase receives hash
+    let passwordToSend = updates.password;
+    if (updates.password && !supportsServerAuth) {
+      passwordToSend = await hashPassword(updates.password);
+    }
+
     const payload = {
-      ...(updates.password ? { password: updates.password } : {}),
+      ...(updates.password ? { password: passwordToSend } : {}),
       ...(typeof updates.is_admin === 'boolean' ? { is_admin: updates.is_admin } : {}),
       ...(updates.avatar_url !== undefined ? { avatar_url: avatarValue } : {})
     };
     if (cloudConnected && Object.keys(payload).length > 0) {
-      await supabase.updateUser(username, payload);
+      await dataClient.updateUser(username, payload);
     }
     if (updates.avatar_url !== undefined) {
       storeAvatar(username, avatarValue || '');
     }
+    // Don't store password in local state - it's server-side only now
+    const statePayload = {
+      ...(typeof updates.is_admin === 'boolean' ? { is_admin: updates.is_admin } : {}),
+      ...(updates.avatar_url !== undefined ? { avatar_url: avatarValue } : {})
+    };
     setUsers((prev) => prev.map((user) => (
-      user.username === username ? { ...user, ...payload } : user
+      user.username === username ? { ...user, ...statePayload } : user
     )));
     setCurrentUser((prev) => (
-      prev?.username === username ? { ...prev, ...payload } : prev
+      prev?.username === username ? { ...prev, ...statePayload } : prev
     ));
   };
 
@@ -152,6 +177,7 @@ export default function useAuthUsers() {
     showLogin,
     showAdmin,
     cloudConnected,
+    supportsServerAuth,
     setShowAdmin,
     handleLogin,
     handleLogout,

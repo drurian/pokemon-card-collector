@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { dedupeById, ensureQuantitiesForCollection, normalizeQuantities } from '../utils/collection';
-import { supabase } from '../services/supabase';
+import { dataClient } from '../services/dataClient';
 
 export default function useCollectionData({ currentUser, cloudConnected }) {
   const [collection, setCollection] = useState([]);
@@ -16,7 +16,7 @@ export default function useCollectionData({ currentUser, cloudConnected }) {
     if (!cloudConnected) return;
     try {
       setSaveStatus('Loading...');
-      const data = await supabase.loadData(username);
+      const data = await dataClient.loadData(username);
       if (data) {
         const dedupedCollection = dedupeById(data.collection);
         const dedupedWishlist = dedupeById(data.wishlist);
@@ -38,7 +38,7 @@ export default function useCollectionData({ currentUser, cloudConnected }) {
     if (!currentUser || !cloudConnected) return;
     try {
       setSaveStatus('Saving...');
-      await supabase.saveData(currentUser.username, collection, wishlist, cardTags, cardQuantities, allTags);
+      await dataClient.saveData(currentUser.username, collection, wishlist, cardTags, cardQuantities, allTags);
       setSaveStatus('Saved!');
       setTimeout(() => setSaveStatus(''), 1500);
     } catch (e) {

@@ -25,6 +25,7 @@ export default function PokemonCardTracker() {
     showLogin,
     showAdmin,
     cloudConnected,
+    supportsServerAuth,
     setShowAdmin,
     handleLogin,
     handleLogout,
@@ -120,7 +121,7 @@ export default function PokemonCardTracker() {
     pageSize: PAGE_SIZE
   });
 
-  if (showLogin) return <LoginScreen onLogin={handleLogin} users={users} />;
+  if (showLogin) return <LoginScreen onLogin={handleLogin} users={users} supportsServerAuth={supportsServerAuth} />;
 
   return (
     <div className="min-h-screen bg-blue-50 flex flex-col">

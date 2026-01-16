@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { ChevronDown, Edit2, Plus, Shield, Tag, Trash2, User, Users, X } from 'lucide-react';
-import { hashPassword } from '../utils/auth';
 import blastoisePng from '../assets/blastoise.png';
 import pikachuSvg from '../assets/pikachu.svg';
 import pokeballSvg from '../assets/pokeball.svg';
@@ -44,8 +43,8 @@ const AdminPanel = ({
       alert('Username already exists');
       return;
     }
-    const hashedPassword = await hashPassword(newPassword);
-    onAddUser(newUsername, hashedPassword, newIsAdmin);
+    // Pass plain password - useAuthUsers handles hashing appropriately
+    await onAddUser(newUsername, newPassword, newIsAdmin);
     setNewUsername('');
     setNewPassword('');
     setNewIsAdmin(false);
@@ -62,12 +61,9 @@ const AdminPanel = ({
 
   const handleUpdateUser = async () => {
     if (!editingUser) return;
-    let hashedPassword = '';
-    if (editPassword) {
-      hashedPassword = await hashPassword(editPassword);
-    }
+    // Pass plain password - useAuthUsers handles hashing appropriately
     await onUpdateUser(editingUser.username, {
-      password: hashedPassword || undefined,
+      password: editPassword || undefined,
       is_admin: editIsAdmin,
       avatar_url: editAvatar
     });
