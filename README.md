@@ -245,7 +245,7 @@ npx playwright test --ui
 
 ## License
 
-This project is private and not licensed for public use.
+This project is licensed under the MIT License. See the `LICENSE` file for details.
 
 ## Acknowledgments
 
