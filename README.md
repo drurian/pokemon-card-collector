@@ -198,15 +198,18 @@ When using the local backend:
 
 ### Development
 ```bash
-docker-compose up
+docker compose up
 ```
 
 ### Production
 ```bash
-docker-compose -f docker-compose.prod.yml up -d
+cp .env.prod.example .env.prod
+# edit .env.prod and set real image names in docker-compose.prod.yml
+docker compose --env-file .env.prod -f docker-compose.prod.yml pull
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
 ```
 
-> **Note:** Update the image references in `docker-compose.prod.yml` to point to your container registry.
+> **Note:** Production uses `.env.prod` and requires `--env-file .env.prod` on every `docker compose` command.
 
 ## Testing
 
