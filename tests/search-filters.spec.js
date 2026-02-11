@@ -35,7 +35,7 @@ test('search filters apply and reset returns to featured cards', async ({ page }
     {
       id: 'test-1',
       name: 'River Spark',
-      set: { name: 'Mock Set' },
+      set: { name: 'Base Set' },
       number: '1',
       rarity: 'Common',
       types: ['Water'],
@@ -44,7 +44,7 @@ test('search filters apply and reset returns to featured cards', async ({ page }
     {
       id: 'test-2',
       name: 'Stone Ember',
-      set: { name: 'Mock Set' },
+      set: { name: 'Base Set' },
       number: '2',
       rarity: 'Rare',
       types: ['Fire']
@@ -108,4 +108,86 @@ test('search filters apply and reset returns to featured cards', async ({ page }
   await expect(page.getByPlaceholder('Search by name...')).toHaveValue('');
   await expect(filters.nth(0)).toHaveValue('');
   await expect(filters.nth(1)).toHaveValue('');
+});
+
+test('clears no-results error when filters are updated to matching cards', async ({ page }) => {
+  const featuredCards = [
+    {
+      id: 'test-1',
+      name: 'River Spark',
+      set: { name: 'Base Set' },
+      number: '1',
+      rarity: 'Common',
+      types: ['Water'],
+      image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+Z2a8AAAAASUVORK5CYII='
+    },
+    {
+      id: 'test-2',
+      name: 'Stone Ember',
+      set: { name: 'Base Set' },
+      number: '2',
+      rarity: 'Rare',
+      types: ['Fire']
+    }
+  ];
+
+  await page.route('https://api.tcgdex.net/**', (route) => {
+    const url = route.request().url();
+    if (url.endsWith('/v2/en/sets')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([{ id: 'test-set', releaseDate: '2024-01-01' }])
+      });
+    }
+    if (url.includes('/v2/en/sets/test-set')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ cards: featuredCards })
+      });
+    }
+    if (url.includes('/v2/en/cards?')) {
+      const params = new URL(url).searchParams;
+      const typeFilter = params.get('types');
+      const rarityFilter = params.get('rarity');
+      const filtered = featuredCards.filter((card) => {
+        const typeMatch = !typeFilter || card.types?.includes(typeFilter);
+        const rarityMatch = !rarityFilter || card.rarity === rarityFilter;
+        return typeMatch && rarityMatch;
+      });
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(filtered)
+      });
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([])
+    });
+  });
+
+  await login(page, 'admin', 'admin123');
+
+  const noCardsError = page.getByText('No cards found. Try different filters.');
+  const cards = page.locator('main .relative.cursor-pointer');
+
+  await page.getByRole('button', { name: 'Toggle filters' }).click();
+  const filters = page.locator('main select');
+  await expect(filters).toHaveCount(2);
+
+  await filters.nth(0).selectOption({ label: 'Water' });
+  await filters.nth(1).selectOption({ label: 'Rare' });
+  await page.getByRole('button', { name: 'Search' }).click();
+
+  await expect(cards).toHaveCount(0);
+  await expect(noCardsError).toBeVisible();
+
+  await filters.nth(1).selectOption({ label: 'Common' });
+  await page.getByRole('button', { name: 'Search' }).click();
+
+  await expect(cards).toHaveCount(1);
+  await expect(noCardsError).toHaveCount(0);
 });

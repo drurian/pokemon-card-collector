@@ -6,7 +6,7 @@ test('shows cards with images and modal details after admin login', async ({ pag
     {
       id: 'test-1',
       name: 'River Spark',
-      set: { name: 'Mock Set' },
+      set: { name: 'Base Set' },
       number: '1',
       rarity: 'Common',
       types: ['Water'],
@@ -15,7 +15,7 @@ test('shows cards with images and modal details after admin login', async ({ pag
     {
       id: 'test-2',
       name: 'No Image',
-      set: { name: 'Mock Set' },
+      set: { name: 'Base Set' },
       number: '2',
       rarity: 'Rare',
       types: ['Fire']

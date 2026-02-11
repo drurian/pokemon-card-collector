@@ -14,6 +14,7 @@ export default function useCards() {
   const [showFilters, setShowFilters] = useState(false);
 
   const abortControllerRef = useRef(null);
+  const searchRequestIdRef = useRef(0);
 
   useEffect(() => {
     const loadFeaturedCards = async () => {
@@ -68,26 +69,44 @@ export default function useCards() {
   }, []);
 
   const cancelSearch = () => {
-    if (abortControllerRef.current) abortControllerRef.current.abort();
+    searchRequestIdRef.current += 1;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
     setLoading(false);
   };
 
   const searchCards = async () => {
     const hasQuery = searchQuery.trim() || searchType || searchRarity;
     if (!hasQuery) {
+      cancelSearch();
       setCards(SAMPLE_CARDS);
       setSearchResults([]);
+      setError('');
       return;
     }
-    cancelSearch();
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    const requestId = searchRequestIdRef.current + 1;
+    searchRequestIdRef.current = requestId;
     abortControllerRef.current = new AbortController();
+
     setLoading(true);
     setError('');
     let timeoutId;
+    let didTimeout = false;
     try {
       const params = buildTcgParams(searchQuery, searchType, searchRarity);
       const url = params.toString() ? `${TCGDEX_API_URL}?${params.toString()}` : TCGDEX_API_URL;
-      timeoutId = setTimeout(() => abortControllerRef.current?.abort(), 10000);
+      timeoutId = setTimeout(() => {
+        if (requestId !== searchRequestIdRef.current) return;
+        didTimeout = true;
+        abortControllerRef.current?.abort();
+      }, 10000);
       const res = await fetch(url, { signal: abortControllerRef.current.signal });
       if (!res.ok) {
         throw new Error(`Search failed (HTTP ${res.status})`);
@@ -96,24 +115,49 @@ export default function useCards() {
       const formatted = (Array.isArray(data) ? data : data?.data || []).map(formatTcgCard);
       const enriched = await enrichCardsWithDetails(formatted, abortControllerRef.current.signal);
       const finalCards = enriched.length > 0 ? enriched : formatted;
+      if (requestId !== searchRequestIdRef.current) return;
       if (finalCards.length === 0) {
         setError('No cards found. Try different filters.');
+      } else {
+        setError('');
       }
       setSearchResults(finalCards);
       setCards(finalCards);
     } catch (e) {
-      if (e.name === 'AbortError') {
+      if (requestId !== searchRequestIdRef.current) return;
+      if (e.name === 'AbortError' && didTimeout) {
         setError('Search timed out. Please try again.');
-      } else {
+      } else if (e.name !== 'AbortError') {
         setError(e.message || 'Search failed. Please try again.');
+      } else {
+        setError('');
       }
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
-      setLoading(false);
+      if (requestId === searchRequestIdRef.current) {
+        abortControllerRef.current = null;
+        setLoading(false);
+      }
     }
   };
 
+  const updateSearchQuery = (value) => {
+    setSearchQuery(value);
+    if (error) setError('');
+  };
+
+  const updateSearchType = (value) => {
+    setSearchType(value);
+    if (error) setError('');
+  };
+
+  const updateSearchRarity = (value) => {
+    setSearchRarity(value);
+    if (error) setError('');
+  };
+
   const resetToSample = () => {
+    cancelSearch();
     setCards(SAMPLE_CARDS);
     setSearchResults([]);
     setSearchQuery('');
@@ -132,9 +176,9 @@ export default function useCards() {
     searchRarity,
     showFilters,
     setShowFilters,
-    setSearchQuery,
-    setSearchType,
-    setSearchRarity,
+    setSearchQuery: updateSearchQuery,
+    setSearchType: updateSearchType,
+    setSearchRarity: updateSearchRarity,
     searchCards,
     resetToSample,
     cancelSearch

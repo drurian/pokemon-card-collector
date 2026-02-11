@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Filter, Heart, Loader2, LogOut, RefreshCw, Search, Shield, Star, StopCircle, User } from 'lucide-react';
 import pokeballSvg from '../assets/pokeball.svg';
-import { AdminPanel, CardGrid, CardModal, LoginScreen, Pagination, PikachuIcon, SelectDropdown, SquirtleIcon } from '../components';
+import { AdminPanel, CardGrid, CardList, CardModal, LoginScreen, Pagination, PikachuIcon, SelectDropdown, SortDropdown, SquirtleIcon, ViewToggle } from '../components';
 import { PAGE_SIZE, RARITIES, TYPES } from '../constants/cards';
+import { SORT_OPTIONS } from '../utils/sorting';
 import { getTypeBg, getTypeEmoji } from '../utils/cardsUi';
 import { getTagColor } from '../utils/tags';
+import { getViewPreferences, setViewPreferences } from '../utils/storage';
 import { useAuthUsers, useCards, useCollectionData, useFilteredCollection, useFilteredWishlist, usePagedList, usePricing } from '../hooks';
 
 export default function PokemonCardTracker() {
@@ -18,6 +20,17 @@ export default function PokemonCardTracker() {
   const [collectionTagFilter, setCollectionTagFilter] = useState('');
   const [collectionSearchQuery, setCollectionSearchQuery] = useState('');
   const [wishlistSearchQuery, setWishlistSearchQuery] = useState('');
+  const [wishlistTagFilter, setWishlistTagFilter] = useState('');
+
+  // View preferences (persisted to localStorage)
+  const [viewMode, setViewMode] = useState(() => getViewPreferences().viewMode || 'grid');
+  const [collectionSortBy, setCollectionSortBy] = useState(() => getViewPreferences().sortBy || '');
+  const [wishlistSortBy, setWishlistSortBy] = useState('');
+
+  // Persist view preferences
+  useEffect(() => {
+    setViewPreferences({ viewMode, sortBy: collectionSortBy });
+  }, [viewMode, collectionSortBy]);
 
   const {
     currentUser,
@@ -56,6 +69,7 @@ export default function PokemonCardTracker() {
     collection,
     wishlist,
     cardTags,
+    cardQuantities,
     allTags,
     saveStatus,
     addTagToCard,
@@ -91,15 +105,20 @@ export default function PokemonCardTracker() {
   const { filteredCollection } = useFilteredCollection({
     collection,
     cardTags,
+    cardQuantities,
     collectionTypeFilter,
     collectionRarityFilter,
     collectionTagFilter,
     collectionSearchQuery,
+    collectionSortBy,
     onResetPage: () => setCollectionPage(1)
   });
   const { filteredWishlist } = useFilteredWishlist({
     wishlist,
+    cardTags,
     wishlistSearchQuery,
+    wishlistTagFilter,
+    wishlistSortBy,
     onResetPage: () => setWishlistPage(1)
   });
   const { pageCount: browsePageCount, pagedItems: pagedBrowseCards } = usePagedList({
@@ -120,6 +139,16 @@ export default function PokemonCardTracker() {
     setPage: setWishlistPage,
     pageSize: PAGE_SIZE
   });
+
+  // Shared props for card display components
+  const cardDisplayProps = {
+    onSelect: handleSelectCard,
+    getTypeBg,
+    getTypeEmoji,
+    getCardQuantity,
+    isInCollection,
+    isInWishlist
+  };
 
   if (showLogin) return <LoginScreen onLogin={handleLogin} users={users} supportsServerAuth={supportsServerAuth} />;
 
@@ -219,7 +248,7 @@ export default function PokemonCardTracker() {
             {error && <div className="mb-3 p-2 bg-red-100 border-2 border-red-300 rounded-lg text-red-800 text-sm font-medium">{error}</div>}
             {searchResults.length > 0 && !loading && <button onClick={resetToSample} className="mb-3 px-3 py-2 bg-white text-gray-700 rounded-lg hover:bg-gray-50 transition flex items-center gap-2 text-sm font-medium border-2 border-gray-300"><RefreshCw size={14} /> Back to Featured</button>}
             {searchResults.length === 0 && !loading && <div className="mb-4 text-2xl font-bold text-gray-800 text-center">Featured set</div>}
-            {loading ? <div className="flex flex-col items-center justify-center py-12 gap-2 bg-white rounded-xl"><Loader2 className="animate-spin text-blue-600" size={40} /><p className="text-gray-700 font-medium">Searching...</p></div> : <CardGrid cardList={pagedBrowseCards} emptyMsg="No cards found." onSelect={handleSelectCard} getTypeBg={getTypeBg} getTypeEmoji={getTypeEmoji} getCardQuantity={getCardQuantity} isInCollection={isInCollection} isInWishlist={isInWishlist} />}
+            {loading ? <div className="flex flex-col items-center justify-center py-12 gap-2 bg-white rounded-xl"><Loader2 className="animate-spin text-blue-600" size={40} /><p className="text-gray-700 font-medium">Searching...</p></div> : <CardGrid cardList={pagedBrowseCards} emptyMsg="No cards found." {...cardDisplayProps} />}
             <Pagination currentPage={browsePage} pageCount={browsePageCount} onPageChange={setBrowsePage} />
           </>
         )}
@@ -236,40 +265,111 @@ export default function PokemonCardTracker() {
                       · Total copies: <span className="font-bold text-blue-600">{getTotalCards()}</span>
                     </div>
                   </div>
-                  <div className="flex gap-2 flex-wrap">
-                    <input
-                      type="text"
-                      value={collectionSearchQuery}
-                      onChange={(e) => setCollectionSearchQuery(e.target.value)}
-                      placeholder="Search by name..."
-                      className="flex-1 min-w-40 px-3 py-2 rounded-lg bg-white text-gray-900 border-2 border-gray-300 focus:border-blue-500 focus:outline-none text-sm font-medium placeholder-gray-500"
-                    />
-                    <SelectDropdown value={collectionTypeFilter} onChange={(event) => setCollectionTypeFilter(event.target.value)} options={TYPES} placeholder="All Types" className="w-32" />
-                    <SelectDropdown value={collectionRarityFilter} onChange={(event) => setCollectionRarityFilter(event.target.value)} options={RARITIES} placeholder="All Rarities" className="w-32" />
-                    {allTags.length > 0 && <SelectDropdown value={collectionTagFilter} onChange={(event) => setCollectionTagFilter(event.target.value)} options={allTags} placeholder="All Tags" className="w-32" />}
+                  <div className="flex items-center gap-2">
+                    <ViewToggle view={viewMode} onChange={setViewMode} />
                   </div>
                 </div>
-                {(collectionTypeFilter || collectionRarityFilter || collectionTagFilter || collectionSearchQuery) && <div className="mt-2 text-sm text-gray-600 border-t pt-2">Showing <span className="font-bold">{filteredCollection.length}</span> of {collection.length} <button onClick={() => { setCollectionTypeFilter(''); setCollectionRarityFilter(''); setCollectionTagFilter(''); setCollectionSearchQuery(''); }} className="ml-2 text-blue-600 font-medium">Clear</button></div>}
+                <div className="flex gap-2 flex-wrap mt-3">
+                  <input
+                    type="text"
+                    value={collectionSearchQuery}
+                    onChange={(e) => setCollectionSearchQuery(e.target.value)}
+                    placeholder="Search by name..."
+                    className="flex-1 min-w-40 px-3 py-2 rounded-lg bg-white text-gray-900 border-2 border-gray-300 focus:border-blue-500 focus:outline-none text-sm font-medium placeholder-gray-500"
+                  />
+                  <SortDropdown
+                    value={collectionSortBy}
+                    onChange={setCollectionSortBy}
+                    options={SORT_OPTIONS}
+                    className="w-44"
+                  />
+                </div>
+                <div className="flex gap-2 flex-wrap mt-2">
+                  <SelectDropdown value={collectionTypeFilter} onChange={(event) => setCollectionTypeFilter(event.target.value)} options={TYPES} placeholder="All Types" className="flex-1 min-w-28" />
+                  <SelectDropdown value={collectionRarityFilter} onChange={(event) => setCollectionRarityFilter(event.target.value)} options={RARITIES} placeholder="All Rarities" className="flex-1 min-w-28" />
+                  {allTags.length > 0 && <SelectDropdown value={collectionTagFilter} onChange={(event) => setCollectionTagFilter(event.target.value)} options={allTags} placeholder="All Tags" className="flex-1 min-w-28" />}
+                </div>
+                {(collectionTypeFilter || collectionRarityFilter || collectionTagFilter || collectionSearchQuery) && (
+                  <div className="mt-2 text-sm text-gray-600 border-t pt-2">
+                    Showing <span className="font-bold">{filteredCollection.length}</span> of {collection.length}
+                    <button onClick={() => { setCollectionTypeFilter(''); setCollectionRarityFilter(''); setCollectionTagFilter(''); setCollectionSearchQuery(''); }} className="ml-2 text-blue-600 font-medium hover:underline">Clear filters</button>
+                  </div>
+                )}
               </div>
             )}
-            <CardGrid cardList={pagedCollection} emptyMsg={collection.length ? "No cards match filters." : "Your collection is empty!"} onSelect={handleSelectCard} getTypeBg={getTypeBg} getTypeEmoji={getTypeEmoji} getCardQuantity={getCardQuantity} isInCollection={isInCollection} isInWishlist={isInWishlist} />
+            {viewMode === 'grid' ? (
+              <CardGrid
+                cardList={pagedCollection}
+                emptyMsg={collection.length ? "No cards match filters." : "Your collection is empty!"}
+                {...cardDisplayProps}
+              />
+            ) : (
+              <CardList
+                cardList={pagedCollection}
+                emptyMsg={collection.length ? "No cards match filters." : "Your collection is empty!"}
+                cardTags={cardTags}
+                getTagColor={getTagColor}
+                {...cardDisplayProps}
+              />
+            )}
             <Pagination currentPage={collectionPage} pageCount={collectionPageCount} onPageChange={setCollectionPage} />
           </>
         )}
         {view === 'wishlist' && (
           <>
             {wishlist.length > 0 && (
-              <div className="mb-3">
-                <input
-                  type="text"
-                  value={wishlistSearchQuery}
-                  onChange={(e) => setWishlistSearchQuery(e.target.value)}
-                  placeholder="Search wishlist by name..."
-                  className="w-full px-3 py-2 rounded-lg bg-white text-gray-900 border-2 border-gray-300 focus:border-blue-500 focus:outline-none text-sm font-medium placeholder-gray-500"
-                />
+              <div className="bg-white border-2 border-pink-200 rounded-xl p-3 mb-4">
+                <div className="flex justify-between items-center flex-wrap gap-2 mb-3">
+                  <div className="text-pink-700 font-bold">❤️ Your Wishlist</div>
+                  <ViewToggle view={viewMode} onChange={setViewMode} />
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  <input
+                    type="text"
+                    value={wishlistSearchQuery}
+                    onChange={(e) => setWishlistSearchQuery(e.target.value)}
+                    placeholder="Search wishlist by name..."
+                    className="flex-1 min-w-40 px-3 py-2 rounded-lg bg-white text-gray-900 border-2 border-gray-300 focus:border-blue-500 focus:outline-none text-sm font-medium placeholder-gray-500"
+                  />
+                  <SortDropdown
+                    value={wishlistSortBy}
+                    onChange={setWishlistSortBy}
+                    options={SORT_OPTIONS.filter(opt => !opt.value.startsWith('quantity'))}
+                    className="w-44"
+                  />
+                  {allTags.length > 0 && (
+                    <SelectDropdown
+                      value={wishlistTagFilter}
+                      onChange={(e) => setWishlistTagFilter(e.target.value)}
+                      options={allTags}
+                      placeholder="All Tags"
+                      className="w-32"
+                    />
+                  )}
+                </div>
+                {(wishlistSearchQuery || wishlistTagFilter) && (
+                  <div className="mt-2 text-sm text-gray-600 border-t pt-2">
+                    Showing <span className="font-bold">{filteredWishlist.length}</span> of {wishlist.length}
+                    <button onClick={() => { setWishlistSearchQuery(''); setWishlistTagFilter(''); }} className="ml-2 text-pink-600 font-medium hover:underline">Clear filters</button>
+                  </div>
+                )}
               </div>
             )}
-            <CardGrid cardList={pagedWishlist} emptyMsg="Your wishlist is empty!" onSelect={handleSelectCard} getTypeBg={getTypeBg} getTypeEmoji={getTypeEmoji} getCardQuantity={getCardQuantity} isInCollection={isInCollection} isInWishlist={isInWishlist} />
+            {viewMode === 'grid' ? (
+              <CardGrid
+                cardList={pagedWishlist}
+                emptyMsg="Your wishlist is empty!"
+                {...cardDisplayProps}
+              />
+            ) : (
+              <CardList
+                cardList={pagedWishlist}
+                emptyMsg="Your wishlist is empty!"
+                cardTags={cardTags}
+                getTagColor={getTagColor}
+                {...cardDisplayProps}
+              />
+            )}
             <Pagination currentPage={wishlistPage} pageCount={wishlistPageCount} onPageChange={setWishlistPage} />
           </>
         )}

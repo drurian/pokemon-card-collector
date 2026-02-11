@@ -49,7 +49,7 @@ test('can remove from collection and wishlist and update counts', async ({ page 
     {
       id: 'test-1',
       name: 'River Spark',
-      set: { name: 'Mock Set' },
+      set: { name: 'Base Set' },
       number: '1',
       rarity: 'Common',
       types: ['Water'],
@@ -58,7 +58,7 @@ test('can remove from collection and wishlist and update counts', async ({ page 
     {
       id: 'test-2',
       name: 'Stone Ember',
-      set: { name: 'Mock Set' },
+      set: { name: 'Base Set' },
       number: '2',
       rarity: 'Rare',
       types: ['Fire']
