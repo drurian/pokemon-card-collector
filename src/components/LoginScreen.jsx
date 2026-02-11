@@ -1,27 +1,51 @@
 import { useState } from 'react';
 import { hashPassword, isPasswordHash } from '../utils/auth';
+import { dataClient } from '../services/dataClient';
 
-const LoginScreen = ({ onLogin, users }) => {
+const LoginScreen = ({ onLogin, users, supportsServerAuth }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
     if (!username || !password) {
       setError('Please enter username and password');
       return;
     }
-    const hashedPassword = await hashPassword(password);
-    const isPreHashed = isPasswordHash(password);
-    const user = users.find((u) => (
-      u.username === username
-      && (u.password === hashedPassword || (isPreHashed && u.password === password))
-    ));
-    if (user) {
-      onLogin(user, rememberMe);
-    } else {
-      setError('Invalid username or password');
+
+    setLoading(true);
+    setError('');
+
+    try {
+      if (supportsServerAuth) {
+        // Secure server-side authentication (local backend with bcrypt)
+        const user = await dataClient.login(username, password);
+        onLogin(user, rememberMe);
+      } else {
+        // Legacy client-side authentication (Supabase - should migrate to Supabase Auth)
+        const hashedPassword = await hashPassword(password);
+        const isPreHashed = isPasswordHash(password);
+        const user = users.find((u) => (
+          u.username === username
+          && (u.password === hashedPassword || (isPreHashed && u.password === password))
+        ));
+        if (user) {
+          onLogin(user, rememberMe);
+        } else {
+          setError('Invalid username or password');
+        }
+      }
+    } catch (err) {
+      if (err.status === 401) {
+        setError('Invalid username or password');
+      } else {
+        setError('Login failed. Please try again.');
+        console.error('Login error:', err);
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -39,13 +63,39 @@ const LoginScreen = ({ onLogin, users }) => {
           </div>
         )}
         <div className="space-y-3">
-          <input type="text" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:border-blue-500 focus:outline-none" />
-          <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSubmit()} className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:border-blue-500 focus:outline-none" />
+          <input
+            type="text"
+            placeholder="Username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            disabled={loading}
+            className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:border-blue-500 focus:outline-none disabled:bg-gray-100"
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && !loading && handleSubmit()}
+            disabled={loading}
+            className="w-full px-4 py-3 rounded-lg border-2 border-gray-300 focus:border-blue-500 focus:outline-none disabled:bg-gray-100"
+          />
           <label className="flex items-center gap-2 text-sm text-gray-600">
-            <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              disabled={loading}
+            />
             Remember me on this device
           </label>
-          <button onClick={handleSubmit} className="w-full py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition">Sign In</button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            className="w-full py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition disabled:bg-blue-400 disabled:cursor-not-allowed"
+          >
+            {loading ? 'Signing In...' : 'Sign In'}
+          </button>
         </div>
       </div>
     </div>
