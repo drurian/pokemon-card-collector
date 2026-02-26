@@ -8,6 +8,13 @@ APP_ENV_FILE=.env.prod
 
 # Required
 DB_ENGINE=mysql
+MYSQL_DUMP_MODE=auto
+
+# Docker MySQL mode settings (used when MYSQL_DUMP_MODE=docker or auto).
+DOCKER_DB_SERVICE=db
+# DOCKER_COMPOSE_BASE_DIR=/path/to/app/root
+DOCKER_COMPOSE_FILE=docker-compose.prod.yml
+# DOCKER_COMPOSE_ENV_FILE=.env.prod
 
 # Optional DB_* overrides.
 # Leave these commented to use values from APP_ENV_FILE.

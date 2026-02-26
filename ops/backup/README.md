@@ -43,7 +43,13 @@ If using PostgreSQL:
 
 If using MySQL/MariaDB:
 - keep `DB_ENGINE=mysql`
+- default `MYSQL_DUMP_MODE=auto` (prefers Docker Compose when available)
 - set `DB_PORT=3306` (or your custom port)
+
+MySQL dump mode:
+- `MYSQL_DUMP_MODE=auto`: uses Docker Compose dump when `DOCKER_COMPOSE_FILE` is found; otherwise host `mysqldump`.
+- `MYSQL_DUMP_MODE=docker`: always dumps from the DB container (`DOCKER_DB_SERVICE`, default `db`).
+- `MYSQL_DUMP_MODE=host`: always uses host `mysqldump` with `DB_HOST/DB_PORT`.
 
 ## 2) Create least-privileged backup user
 

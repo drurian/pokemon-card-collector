@@ -67,6 +67,18 @@ require_cmd() {
   fi
 }
 
+resolve_compose_command() {
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    COMPOSE_CMD=(docker compose)
+    return 0
+  fi
+  if command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE_CMD=(docker-compose)
+    return 0
+  fi
+  return 1
+}
+
 if [[ ! -f "$CONFIG_PATH" ]]; then
   echo "Config file not found: $CONFIG_PATH" >&2
   exit 1
@@ -100,11 +112,13 @@ source "$CONFIG_PATH"
 
 LOG_TAG="${LOG_TAG:-db-backup}"
 DB_ENGINE="${DB_ENGINE:-mysql}"
+MYSQL_DUMP_MODE="${MYSQL_DUMP_MODE:-auto}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/db}"
 RETENTION_COUNT="${RETENTION_COUNT:-14}"
 COMPRESSION_LEVEL="${COMPRESSION_LEVEL:-6}"
 UPLOAD_TARGET="${UPLOAD_TARGET:-none}"
 LOCK_FILE="${LOCK_FILE:-/var/lock/db-backup.lock}"
+DOCKER_DB_SERVICE="${DOCKER_DB_SERVICE:-db}"
 DB_HOST="${DB_HOST:-127.0.0.1}"
 if [[ -z "${DB_PORT:-}" ]]; then
   if [[ "$DB_ENGINE" == "postgres" ]]; then
@@ -113,15 +127,18 @@ if [[ -z "${DB_PORT:-}" ]]; then
     DB_PORT="3306"
   fi
 fi
-
-require_var DB_NAME
-require_var DB_USER
-require_var DB_PASSWORD
+DOCKER_COMPOSE_BASE_DIR="${DOCKER_COMPOSE_BASE_DIR:-$(dirname "$LOADED_APP_ENV_FILE")}"
+DOCKER_COMPOSE_BASE_DIR="$(resolve_path "$DOCKER_COMPOSE_BASE_DIR" "$config_dir")"
+DOCKER_COMPOSE_FILE="${DOCKER_COMPOSE_FILE:-docker-compose.prod.yml}"
+DOCKER_COMPOSE_FILE="$(resolve_path "$DOCKER_COMPOSE_FILE" "$DOCKER_COMPOSE_BASE_DIR")"
+DOCKER_COMPOSE_ENV_FILE="${DOCKER_COMPOSE_ENV_FILE:-$LOADED_APP_ENV_FILE}"
+DOCKER_COMPOSE_ENV_FILE="$(resolve_path "$DOCKER_COMPOSE_ENV_FILE" "$DOCKER_COMPOSE_BASE_DIR")"
 
 require_cmd gzip
 require_cmd sha256sum
 require_cmd logger
 require_cmd flock
+require_var DB_NAME
 
 timestamp="$(date +%Y%m%d-%H%M%S)"
 base_name="${DB_ENGINE}-${DB_NAME}-${timestamp}"
@@ -160,20 +177,66 @@ if ! flock -n 9; then
 fi
 
 dump_mysql() {
-  require_cmd mysqldump
-  MYSQL_PWD="$DB_PASSWORD" mysqldump \
-    --single-transaction \
-    --quick \
-    --routines \
-    --triggers \
-    --events \
-    --host="$DB_HOST" \
-    --port="$DB_PORT" \
-    --user="$DB_USER" \
-    "$DB_NAME" >"$tmp_sql"
+  local mode="$MYSQL_DUMP_MODE"
+  if [[ "$mode" == "auto" ]]; then
+    if [[ -f "$DOCKER_COMPOSE_FILE" ]] && resolve_compose_command; then
+      mode="docker"
+    else
+      mode="host"
+    fi
+  fi
+
+  case "$mode" in
+    docker)
+      require_var DB_NAME
+      require_var DB_USER
+      require_var DB_PASSWORD
+      if [[ ! -f "$DOCKER_COMPOSE_FILE" ]]; then
+        log err "DOCKER_COMPOSE_FILE not found: $DOCKER_COMPOSE_FILE"
+        exit 1
+      fi
+      if [[ ! -f "$DOCKER_COMPOSE_ENV_FILE" ]]; then
+        log err "DOCKER_COMPOSE_ENV_FILE not found: $DOCKER_COMPOSE_ENV_FILE"
+        exit 1
+      fi
+      if ! resolve_compose_command; then
+        log err "Docker Compose is required for MYSQL_DUMP_MODE=docker"
+        exit 1
+      fi
+      "${COMPOSE_CMD[@]}" --env-file "$DOCKER_COMPOSE_ENV_FILE" -f "$DOCKER_COMPOSE_FILE" exec -T \
+        -e "DB_NAME=$DB_NAME" \
+        -e "DB_USER=$DB_USER" \
+        -e "DB_PASSWORD=$DB_PASSWORD" \
+        "$DOCKER_DB_SERVICE" \
+        sh -lc 'exec mariadb-dump --single-transaction --quick --routines --triggers --events -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME"' >"$tmp_sql"
+      ;;
+    host)
+      require_var DB_NAME
+      require_var DB_USER
+      require_var DB_PASSWORD
+      require_cmd mysqldump
+      MYSQL_PWD="$DB_PASSWORD" mysqldump \
+        --single-transaction \
+        --quick \
+        --routines \
+        --triggers \
+        --events \
+        --host="$DB_HOST" \
+        --port="$DB_PORT" \
+        --user="$DB_USER" \
+        "$DB_NAME" >"$tmp_sql"
+      ;;
+    *)
+      log err "Unsupported MYSQL_DUMP_MODE: $mode (allowed: auto, host, docker)"
+      exit 1
+      ;;
+  esac
 }
 
 dump_postgres() {
+  require_var DB_NAME
+  require_var DB_USER
+  require_var DB_PASSWORD
   require_cmd pg_dump
   PGPASSWORD="$DB_PASSWORD" pg_dump \
     --format=plain \
@@ -218,6 +281,9 @@ prune_local_backups() {
 }
 
 log info "Backup start: engine=$DB_ENGINE db=$DB_NAME target=$BACKUP_DIR"
+if [[ "$DB_ENGINE" == "mysql" ]]; then
+  log info "MySQL dump mode: $MYSQL_DUMP_MODE"
+fi
 
 case "$DB_ENGINE" in
   mysql)
