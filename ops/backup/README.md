@@ -118,3 +118,10 @@ gunzip -c /var/backups/db/postgres-pokemon_collector-YYYYmmdd-HHMMSS.sql.gz | \
 - `RETENTION_DAYS=14` deletes backups older than 2 weeks.
 - `RETENTION_COUNT` is optional and can cap total backup count if set.
 - Each backup has a SHA-256 file (`.sha256`) for integrity checks.
+
+## Troubleshooting
+
+If `db-backup.service` fails under `systemd` but works manually, set explicit paths in `/etc/db-backup.conf`:
+- `APP_ENV_BASE_DIR=/home/deploy/pokemon-card-collector`
+- `DOCKER_COMPOSE_BASE_DIR=/home/deploy/pokemon-card-collector`
+- `MYSQL_DUMP_MODE=docker`
