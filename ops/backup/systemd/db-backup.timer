@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly database backup timer
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=db-backup.service
+
+[Install]
+WantedBy=timers.target
