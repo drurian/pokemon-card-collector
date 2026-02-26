@@ -10,7 +10,7 @@ This bundle provides:
 - `db-backup.sh`: main backup script
 - `db-backup.conf.example`: config template
 - `systemd/db-backup.service`: oneshot service unit
-- `systemd/db-backup.timer`: nightly timer unit
+- `systemd/db-backup.timer`: hourly timer unit
 
 ## 1) Install on the server
 
@@ -86,7 +86,7 @@ sudo journalctl -u db-backup.service -n 100 --no-pager
 
 Cron alternative:
 ```cron
-0 2 * * * /usr/local/bin/db-backup.sh
+0 * * * * /usr/local/bin/db-backup.sh
 ```
 
 ## 4) Enable cloud upload (optional)
@@ -115,5 +115,6 @@ gunzip -c /var/backups/db/postgres-pokemon_collector-YYYYmmdd-HHMMSS.sql.gz | \
 ## Notes
 
 - Backups are written to local disk first, then optionally copied to cloud.
-- Script keeps only `RETENTION_COUNT` local backups per `DB_ENGINE + DB_NAME`.
+- `RETENTION_DAYS=14` deletes backups older than 2 weeks.
+- `RETENTION_COUNT` is optional and can cap total backup count if set.
 - Each backup has a SHA-256 file (`.sha256`) for integrity checks.

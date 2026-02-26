@@ -114,7 +114,8 @@ LOG_TAG="${LOG_TAG:-db-backup}"
 DB_ENGINE="${DB_ENGINE:-mysql}"
 MYSQL_DUMP_MODE="${MYSQL_DUMP_MODE:-auto}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/db}"
-RETENTION_COUNT="${RETENTION_COUNT:-14}"
+RETENTION_COUNT="${RETENTION_COUNT-14}"
+RETENTION_DAYS="${RETENTION_DAYS:-}"
 COMPRESSION_LEVEL="${COMPRESSION_LEVEL:-6}"
 UPLOAD_TARGET="${UPLOAD_TARGET:-none}"
 LOCK_FILE="${LOCK_FILE:-/var/lock/db-backup.lock}"
@@ -258,26 +259,46 @@ upload_cloud() {
 }
 
 prune_local_backups() {
-  local keep="$RETENTION_COUNT"
-  if ! [[ "$keep" =~ ^[0-9]+$ ]]; then
-    log err "RETENTION_COUNT must be an integer, got: $keep"
-    exit 1
-  fi
-  if (( keep < 1 )); then
-    log err "RETENTION_COUNT must be >= 1"
-    exit 1
+  if [[ -n "$RETENTION_DAYS" ]]; then
+    if ! [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
+      log err "RETENTION_DAYS must be an integer, got: $RETENTION_DAYS"
+      exit 1
+    fi
+    if (( RETENTION_DAYS < 1 )); then
+      log err "RETENTION_DAYS must be >= 1"
+      exit 1
+    fi
+    local minutes=$((RETENTION_DAYS * 24 * 60))
+    mapfile -t old_backups < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name "${DB_ENGINE}-${DB_NAME}-*.sql.gz" -mmin +"$minutes" | sort)
+    local old_file
+    for old_file in "${old_backups[@]}"; do
+      rm -f "$old_file" "${old_file}.sha256"
+    done
   fi
 
-  mapfile -t backups < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name "${DB_ENGINE}-${DB_NAME}-*.sql.gz" | sort)
-  local total="${#backups[@]}"
-  if (( total <= keep )); then
-    return
-  fi
+  if [[ -n "$RETENTION_COUNT" ]]; then
+    local keep="$RETENTION_COUNT"
+    if ! [[ "$keep" =~ ^[0-9]+$ ]]; then
+      log err "RETENTION_COUNT must be an integer, got: $keep"
+      exit 1
+    fi
+    if (( keep < 1 )); then
+      log err "RETENTION_COUNT must be >= 1"
+      exit 1
+    fi
 
-  local delete_count=$((total - keep))
-  for ((i = 0; i < delete_count; i++)); do
-    rm -f "${backups[$i]}" "${backups[$i]}.sha256"
-  done
+    mapfile -t backups < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name "${DB_ENGINE}-${DB_NAME}-*.sql.gz" | sort)
+    local total="${#backups[@]}"
+    if (( total <= keep )); then
+      return
+    fi
+
+    local delete_count=$((total - keep))
+    local i
+    for ((i = 0; i < delete_count; i++)); do
+      rm -f "${backups[$i]}" "${backups[$i]}.sha256"
+    done
+  fi
 }
 
 log info "Backup start: engine=$DB_ENGINE db=$DB_NAME target=$BACKUP_DIR"

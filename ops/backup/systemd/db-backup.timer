@@ -1,9 +1,9 @@
 [Unit]
-Description=Nightly database backup timer
+Description=Hourly database backup timer
 
 [Timer]
-OnCalendar=*-*-* 02:00:00
-RandomizedDelaySec=15m
+OnCalendar=hourly
+RandomizedDelaySec=5m
 Persistent=true
 Unit=db-backup.service
 
