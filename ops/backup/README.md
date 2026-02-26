@@ -125,3 +125,9 @@ If `db-backup.service` fails under `systemd` but works manually, set explicit pa
 - `APP_ENV_BASE_DIR=/home/deploy/pokemon-card-collector`
 - `DOCKER_COMPOSE_BASE_DIR=/home/deploy/pokemon-card-collector`
 - `MYSQL_DUMP_MODE=docker`
+
+Then reinstall the latest service unit and reload `systemd`:
+```bash
+sudo install -m 644 systemd/db-backup.service /etc/systemd/system/db-backup.service
+sudo systemctl daemon-reload
+```
