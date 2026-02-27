@@ -10,7 +10,7 @@ This bundle provides:
 - `db-backup.sh`: main backup script
 - `db-backup.conf.example`: config template
 - `systemd/db-backup.service`: oneshot service unit
-- `systemd/db-backup.timer`: hourly timer unit
+- `systemd/db-backup.timer`: nightly timer unit
 
 ## 1) Install on the server
 
@@ -86,7 +86,7 @@ sudo journalctl -u db-backup.service -n 100 --no-pager
 
 Cron alternative:
 ```cron
-0 * * * * /usr/local/bin/db-backup.sh
+0 2 * * * /usr/local/bin/db-backup.sh
 ```
 
 ## 4) Enable cloud upload (optional)
