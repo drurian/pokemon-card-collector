@@ -33,7 +33,7 @@ COMPRESSION_LEVEL=6
 LOCK_FILE=/var/lock/db-backup.lock
 LOG_TAG=db-backup
 
-# Upload behavior: none | cloud
+# Upload behavior: none | cloud | google-drive
 UPLOAD_TARGET=none
 
 # Required only when UPLOAD_TARGET=cloud
@@ -42,3 +42,10 @@ UPLOAD_TARGET=none
 #   CLOUD_PATH=database-backups/pokemon-collector
 CLOUD_REMOTE=
 CLOUD_PATH=
+
+# Required only when UPLOAD_TARGET=google-drive
+# Example Google Drive folder path:
+#   GOOGLE_DRIVE_REMOTE=my-gdrive
+#   GOOGLE_DRIVE_PATH=Backups/pokemon-collector
+GOOGLE_DRIVE_REMOTE=
+GOOGLE_DRIVE_PATH=

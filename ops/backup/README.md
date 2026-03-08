@@ -2,7 +2,7 @@
 
 This bundle provides:
 - Local-first DB backups with retention and checksums
-- Optional cloud upload (using `rclone`)
+- Optional cloud or Google Drive upload (using `rclone`)
 - `systemd` scheduling (recommended) with cron alternative
 
 ## Files
@@ -89,14 +89,23 @@ Cron alternative:
 0 2 * * * /usr/local/bin/db-backup.sh
 ```
 
-## 4) Enable cloud upload (optional)
+## 4) Enable remote upload (optional)
 
 1. Install and configure `rclone` remote.
 2. Update `/etc/db-backup.conf`:
-   - `UPLOAD_TARGET=cloud`
-   - `CLOUD_REMOTE=<rclone remote name>`
-   - `CLOUD_PATH=<bucket/path>`
+   - For generic cloud storage:
+     - `UPLOAD_TARGET=cloud`
+     - `CLOUD_REMOTE=<rclone remote name>`
+     - `CLOUD_PATH=<bucket/path>`
+   - For Google Drive:
+     - `UPLOAD_TARGET=google-drive`
+     - `GOOGLE_DRIVE_REMOTE=<rclone remote name>`
+     - `GOOGLE_DRIVE_PATH=<drive folder path>`
 3. Run one manual backup and verify upload.
+
+Google Drive note:
+- Create an `rclone` remote of type `drive`, then reference that remote name in `GOOGLE_DRIVE_REMOTE`.
+- The backup still lands in `BACKUP_DIR` first; the Google Drive upload is an additional copy.
 
 ## 5) Restore examples
 
@@ -114,7 +123,7 @@ gunzip -c /var/backups/db/postgres-pokemon_collector-YYYYmmdd-HHMMSS.sql.gz | \
 
 ## Notes
 
-- Backups are written to local disk first, then optionally copied to cloud.
+- Backups are written to local disk first, then optionally copied to a remote target.
 - `RETENTION_DAYS=14` deletes backups older than 2 weeks.
 - `RETENTION_COUNT` is optional and can cap total backup count if set.
 - Each backup has a SHA-256 file (`.sha256`) for integrity checks.

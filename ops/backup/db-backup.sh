@@ -249,13 +249,25 @@ dump_postgres() {
     "$DB_NAME" >"$tmp_sql"
 }
 
-upload_cloud() {
+upload_rclone_target() {
   require_cmd rclone
-  require_var CLOUD_REMOTE
-  require_var CLOUD_PATH
-  local remote_path="${CLOUD_REMOTE}:${CLOUD_PATH%/}"
+  local remote_name="$1"
+  local remote_path_root="$2"
+  local remote_path="${remote_name}:${remote_path_root%/}"
   rclone copyto "$final_gz" "$remote_path/$(basename "$final_gz")" >>"$tmp_log" 2>&1
   rclone copyto "$checksum_file" "$remote_path/$(basename "$checksum_file")" >>"$tmp_log" 2>&1
+}
+
+upload_cloud() {
+  require_var CLOUD_REMOTE
+  require_var CLOUD_PATH
+  upload_rclone_target "$CLOUD_REMOTE" "$CLOUD_PATH"
+}
+
+upload_google_drive() {
+  require_var GOOGLE_DRIVE_REMOTE
+  require_var GOOGLE_DRIVE_PATH
+  upload_rclone_target "$GOOGLE_DRIVE_REMOTE" "$GOOGLE_DRIVE_PATH"
 }
 
 prune_local_backups() {
@@ -324,10 +336,22 @@ mv "$tmp_gz" "$final_gz"
 sha256sum "$final_gz" >"$tmp_checksum"
 mv "$tmp_checksum" "$checksum_file"
 
-if [[ "$UPLOAD_TARGET" == "cloud" ]]; then
-  upload_cloud
-  log info "Cloud upload complete for $(basename "$final_gz")"
-fi
+case "$UPLOAD_TARGET" in
+  none)
+    ;;
+  cloud)
+    upload_cloud
+    log info "Cloud upload complete for $(basename "$final_gz")"
+    ;;
+  google-drive)
+    upload_google_drive
+    log info "Google Drive upload complete for $(basename "$final_gz")"
+    ;;
+  *)
+    log err "Unsupported UPLOAD_TARGET: $UPLOAD_TARGET (allowed: none, cloud, google-drive)"
+    exit 1
+    ;;
+esac
 
 prune_local_backups
 
