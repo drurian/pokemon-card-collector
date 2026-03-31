@@ -1,0 +1,21 @@
+[Unit]
+Description=Database backup (local first, optional cloud upload)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/bin/db-backup.sh
+WorkingDirectory=/home/deploy/pokemon-card-collector
+
+# Harden service execution
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/backups/db /var/lock
+
+[Install]
+WantedBy=multi-user.target

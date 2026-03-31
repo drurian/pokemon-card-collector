@@ -28,7 +28,7 @@ services:
     labels:
       traefik.enable: "true"
       traefik.docker.network: ${TRAEFIK_DOCKER_NETWORK:?set TRAEFIK_DOCKER_NETWORK in .env.proxy}
-      traefik.http.routers.pokemon.rule: Host(`${APP_DOMAIN:?set APP_DOMAIN in .env.proxy}`)
+      traefik.http.routers.pokemon.rule: ${APP_HOST_RULE:?set APP_HOST_RULE in .env.proxy}
       traefik.http.routers.pokemon.entrypoints: websecure
       traefik.http.routers.pokemon.tls.certresolver: letsencrypt
       traefik.http.services.pokemon.loadbalancer.server.port: "80"
